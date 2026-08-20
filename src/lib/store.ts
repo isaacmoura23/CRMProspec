@@ -32,11 +32,24 @@ function load(): Database {
   return db;
 }
 
+/**
+ * Em ambientes serverless (ex.: Vercel) o filesystem do projeto é
+ * somente leitura: o banco demo passa a viver apenas em memória e é
+ * regenerado a cada cold start — suficiente para demonstração.
+ */
+let fsWritable = true;
+
 function persist(db: Database) {
-  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-  const tmp = `${DB_FILE}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(db, null, 2), "utf-8");
-  fs.renameSync(tmp, DB_FILE);
+  if (!fsWritable) return;
+  try {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    const tmp = `${DB_FILE}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(db, null, 2), "utf-8");
+    fs.renameSync(tmp, DB_FILE);
+  } catch {
+    fsWritable = false;
+    console.warn("[store] filesystem somente leitura — operando em memória");
+  }
 }
 
 export function getDb(): Database {
