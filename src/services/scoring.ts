@@ -6,7 +6,7 @@ import type { Lead, ScoreFactor, Temperature } from "@/types";
  * "por que esse lead recebeu N pontos".
  */
 
-const BASE_SCORE = 30;
+const BASE_SCORE = 18;
 
 export interface ScoreResult {
   score: number;
