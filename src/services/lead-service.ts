@@ -42,7 +42,11 @@ export function createLeadFromRaw(raw: RawLead, campaignId: string | null, userI
     facebook: raw.facebook ?? null,
     linkedin: null,
     website: raw.website ?? null,
-    google_maps_url: raw.source === "google_places" ? `https://maps.google.com/?q=${encodeURIComponent(raw.company_name)}` : null,
+    google_maps_url:
+      raw.google_maps_url ??
+      (raw.source === "google_places"
+        ? `https://maps.google.com/?q=${encodeURIComponent(raw.company_name)}`
+        : null),
     country: raw.country,
     state: raw.state ?? null,
     city: raw.city,

@@ -387,6 +387,11 @@ function JobProgress({
               <span className="font-semibold">{job.found_lead_ids.length} novos leads</span> salvos,
               analisados e pontuados.
               {job.duplicates > 0 && ` ${job.duplicates} duplicados foram ignorados.`}
+              {(job.filtered ?? 0) > 0 &&
+                ` ${job.filtered} empresas fora do perfil escolhido foram descartadas.`}
+              {job.found_lead_ids.length < job.params.quantity &&
+                job.status === "completed" &&
+                " A região pode ter menos empresas novas que combinam com os filtros — tente ampliar a busca."}
             </div>
           )}
 

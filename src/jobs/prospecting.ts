@@ -3,6 +3,8 @@ import { getDb, nowIso, saveDb } from "@/lib/store";
 import { uid } from "@/lib/utils";
 import { getActiveProvider } from "@/providers/registry";
 import { findDuplicate } from "@/services/dedupe";
+import { enrichBatch } from "@/services/enrichment";
+import { hasActiveFilters, matchesFilters } from "@/services/lead-filter";
 import { createLeadFromRaw, logActivity } from "@/services/lead-service";
 import { aiAnalyzeLead } from "@/ai";
 import type { JobStep, Lead, ProspectingJob, SearchParams } from "@/types";
@@ -57,6 +59,7 @@ export function createProspectingJob(params: SearchParams, userId: string): Pros
     steps: makeSteps(params.quantity),
     found_lead_ids: [],
     duplicates: 0,
+    filtered: 0,
     errors: [],
     campaign_id: campaignId,
     created_at: nowIso(),
@@ -71,8 +74,6 @@ export function createProspectingJob(params: SearchParams, userId: string): Pros
   return job;
 }
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
 async function runProspectingJob(jobId: string, userId: string): Promise<void> {
   const db = getDb();
   const job = db.prospecting_jobs.find((j) => j.id === jobId);
@@ -84,68 +85,89 @@ async function runProspectingJob(jobId: string, userId: string): Promise<void> {
     job.status = "processing";
     saveDb();
 
-    /* 1. Encontrar empresas */
+    /* 1. Encontrar empresas — busca com excedente para compensar
+       duplicados e empresas descartadas pelos filtros */
     const provider = getActiveProvider();
-    const raws = await provider.search(job.params);
+    const filters = job.params.filters;
+    const overfetch = hasActiveFilters(filters) ? 3 : 1.5;
+    const fetchTarget =
+      provider.id === "google_places"
+        ? Math.min(60, Math.max(job.params.quantity + 5, Math.ceil(job.params.quantity * overfetch)))
+        : job.params.quantity;
+
+    // nunca repetir empresas de buscas anteriores, mesmo que os leads tenham sido removidos
+    db.seen_source_ids ??= [];
+    const raws = await provider.search({
+      ...job.params,
+      quantity: fetchTarget,
+      excludeSourceIds: db.seen_source_ids,
+    });
+    const newIds = raws.map((r) => r.source_id).filter((id): id is string => Boolean(id));
+    db.seen_source_ids = [...db.seen_source_ids, ...newIds].slice(-10_000);
+
     const finding = step("finding");
     finding.done = raws.length;
-    finding.total = Math.max(raws.length, finding.total);
+    finding.total = Math.max(raws.length, 1);
     finding.status = "completed";
 
-    const perLeadSteps: Array<JobStep["key"]> = ["enriching", "social", "analyzing", "scoring"];
-    for (const key of perLeadSteps) {
-      const s = step(key);
-      s.total = raws.length;
-      s.status = raws.length > 0 ? "processing" : "completed";
-    }
+    /* 2. Deduplicação contra a base existente */
+    const candidates = raws.filter((raw) => {
+      if (findDuplicate(raw, db.leads)) {
+        job.duplicates += 1;
+        return false;
+      }
+      return true;
+    });
+
+    const enriching = step("enriching");
+    const social = step("social");
+    enriching.total = social.total = candidates.length;
+    enriching.status = social.status = candidates.length > 0 ? "processing" : "completed";
     saveDb();
 
-    /* 2..5. Pipeline por lead — erro em um lead não derruba a busca */
-    for (const raw of raws) {
-      try {
-        // deduplicação antes de salvar
-        const dup = findDuplicate(raw, db.leads);
-        if (dup) {
-          job.duplicates += 1;
-          for (const key of perLeadSteps) step(key).done += 1;
-          saveDb();
-          continue;
-        }
+    /* 3. Enriquecimento real: visita o site e extrai Instagram, e-mail,
+       WhatsApp, qualidade do site e sinais de marketing */
+    const enriched = await enrichBatch(candidates, (done) => {
+      enriching.done = social.done = done;
+      saveDb();
+    });
+    enriching.status = social.status = "completed";
 
+    /* 4. Filtros escolhidos pelo usuário — aplicados após o
+       enriquecimento, quando os dados realmente existem */
+    const matched = enriched.filter((raw) => matchesFilters(raw, filters));
+    job.filtered = enriched.length - matched.length;
+    const selected = matched.slice(0, job.params.quantity);
+
+    const analyzing = step("analyzing");
+    const scoring = step("scoring");
+    analyzing.total = scoring.total = selected.length;
+    analyzing.status = scoring.status = selected.length > 0 ? "processing" : "completed";
+    saveDb();
+
+    /* 5. Criação + análise de IA + score — erro em um lead não derruba a busca */
+    for (const raw of selected) {
+      try {
         const lead = createLeadFromRaw(raw, job.campaign_id, null);
         job.found_lead_ids.push(lead.id);
-
-        step("enriching").done += 1;
-        saveDb();
-        await sleep(60);
-
-        step("social").done += 1;
-        saveDb();
-        await sleep(40);
-
-        // análise automática de oportunidade
         await analyzeAndStore(lead, userId);
-        step("analyzing").done += 1;
-        saveDb();
-
-        step("scoring").done += 1;
-        saveDb();
-        await sleep(30);
       } catch (err) {
         job.errors.push(
           `Não conseguimos processar "${raw.company_name}": ${err instanceof Error ? err.message : "erro desconhecido"}`
         );
-        for (const key of perLeadSteps) {
-          const s = step(key);
-          if (s.done < s.total) s.done += 1;
-        }
-        saveDb();
       }
+      analyzing.done += 1;
+      scoring.done += 1;
+      saveDb();
     }
 
-    for (const key of perLeadSteps) step(key).status = "completed";
+    analyzing.status = scoring.status = "completed";
     job.status = "completed";
     job.finished_at = nowIso();
+
+    const notes: string[] = [];
+    if (job.duplicates > 0) notes.push(`${job.duplicates} duplicados ignorados`);
+    if ((job.filtered ?? 0) > 0) notes.push(`${job.filtered} fora do perfil descartados`);
 
     // notificação de conclusão
     db.notifications.unshift({
@@ -153,10 +175,7 @@ async function runProspectingJob(jobId: string, userId: string): Promise<void> {
       organization_id: db.organization.id,
       user_id: userId,
       title: `Prospecção concluída: ${job.found_lead_ids.length} leads encontrados`,
-      body:
-        job.duplicates > 0
-          ? `${job.duplicates} duplicados foram ignorados automaticamente.`
-          : null,
+      body: notes.length > 0 ? `${notes.join(" · ")}.` : null,
       link: `/leads`,
       read: false,
       created_at: nowIso(),

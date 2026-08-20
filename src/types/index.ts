@@ -356,6 +356,8 @@ export interface SearchParams {
   city: string;
   region?: string;
   quantity: number;
+  /** IDs de origem (ex.: place_id) já retornados em buscas anteriores — nunca repetir */
+  excludeSourceIds?: string[];
   filters: {
     hasPhone?: boolean;
     hasWhatsapp?: boolean;
@@ -396,6 +398,9 @@ export interface RawLead {
   marketing_signals?: boolean;
   business_active?: boolean;
   catalog_size?: Lead["catalog_size"];
+  google_maps_url?: string;
+  /** Link agregador (Linktree etc.) usado no enriquecimento quando não há site próprio */
+  social_link?: string;
 }
 
 export type JobStepKey =
@@ -421,6 +426,8 @@ export interface ProspectingJob {
   steps: JobStep[];
   found_lead_ids: string[];
   duplicates: number;
+  /** Empresas descartadas por não atenderem aos filtros escolhidos */
+  filtered?: number;
   errors: string[];
   campaign_id: string | null;
   created_at: string;
@@ -451,6 +458,8 @@ export interface Database {
   integrations: Integration[];
   webhooks: Webhook[];
   prospecting_jobs: ProspectingJob[];
+  /** IDs de origem já entregues em prospecções — garante empresas novas a cada busca */
+  seen_source_ids?: string[];
   settings: {
     default_niche: string;
     default_country: string;
