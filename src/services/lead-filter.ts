@@ -1,3 +1,4 @@
+import { instagramHandle } from "@/lib/utils";
 import type { RawLead, SearchParams } from "@/types";
 
 /**
@@ -8,7 +9,8 @@ import type { RawLead, SearchParams } from "@/types";
 export function matchesFilters(raw: RawLead, f: SearchParams["filters"]): boolean {
   if (f.hasPhone && !raw.phone) return false;
   if (f.hasWhatsapp && !raw.whatsapp) return false;
-  if (f.hasInstagram && !raw.instagram) return false;
+  // conta como "possui Instagram" apenas um handle que gera link válido
+  if (f.hasInstagram && !instagramHandle(raw.instagram)) return false;
   if (f.hasEmail && !raw.email) return false;
   if (f.noWebsite && raw.website) return false;
   if (f.hasWebsite && !raw.website) return false;
@@ -20,7 +22,10 @@ export function matchesFilters(raw: RawLead, f: SearchParams["filters"]): boolea
   }
   if (f.activeBusiness && raw.business_active === false) return false;
   if (f.hasReviews && (raw.reviews_count ?? 0) < 1) return false;
-  if (f.strongSocial && !(raw.instagram && (raw.instagram_active || raw.marketing_signals))) {
+  if (
+    f.strongSocial &&
+    !(instagramHandle(raw.instagram) && (raw.instagram_active || raw.marketing_signals))
+  ) {
     return false;
   }
   return true;

@@ -41,15 +41,81 @@ async function fetchHtml(url: string): Promise<FetchResult> {
   }
 }
 
+/** Perfis de construtores de site/plataformas — nunca são o Instagram da empresa */
+const IG_JUNK = new Set([
+  "wix", "wixsite", "wixstudio", "shopify", "shopifybr", "wordpress",
+  "godaddy", "squarespace", "canva", "webnode", "hostgator", "hostinger",
+  "instagram", "meta", "facebook", "whatsapp", "google", "nuvemshop",
+  "lojaintegrada", "tray", "vtex", "elementor", "duda", "rdstation",
+]);
+
 export function extractInstagramHandle(text: string): string | null {
   // boundary antes do domínio evita capturar cdninstagram.com e afins
   const re = /(?:^|[^\w.-])(?:www\.)?instagram\.com\/([A-Za-z0-9_.]{2,30})/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text))) {
     const handle = instagramHandle(m[1]);
-    if (handle) return `@${handle}`;
+    if (handle && !IG_JUNK.has(handle.toLowerCase())) return `@${handle}`;
   }
   return null;
+}
+
+/** Só letras e números, para comparar handle × nome da empresa × domínio */
+function bareSlug(s: string): string {
+  return s
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9]/g, "");
+}
+
+/**
+ * Escolhe o Instagram da PRÓPRIA empresa dentro do HTML do site.
+ * Um site costuma linkar vários perfis (agência que o construiu, parceiros,
+ * widgets) — o da empresa é o que se parece com o nome/domínio dela ou o
+ * que mais se repete (header + footer).
+ */
+export function pickInstagramHandle(
+  html: string,
+  hints: { companyName?: string; websiteUrl?: string }
+): string | null {
+  const counts = new Map<string, number>();
+  const re = /(?:^|[^\w.-])(?:www\.)?instagram\.com\/([A-Za-z0-9_.]{2,30})/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html))) {
+    const handle = instagramHandle(m[1]);
+    if (!handle || IG_JUNK.has(handle.toLowerCase())) continue;
+    counts.set(handle, (counts.get(handle) ?? 0) + 1);
+  }
+  if (counts.size === 0) return null;
+
+  const nameSlug = hints.companyName ? bareSlug(hints.companyName) : "";
+  let domainSlug = "";
+  if (hints.websiteUrl) {
+    try {
+      domainSlug = bareSlug(
+        new URL(hints.websiteUrl).hostname.replace(/^www\./, "").split(".")[0] ?? ""
+      );
+    } catch {
+      /* URL inválida — segue sem o domínio */
+    }
+  }
+
+  let best: string | null = null;
+  let bestScore = -1;
+  for (const [handle, freq] of counts) {
+    const hSlug = bareSlug(handle);
+    let score = freq;
+    const similar = (a: string, b: string) =>
+      a.length >= 4 && b.length >= 4 && (a.includes(b) || b.includes(a));
+    if (nameSlug && similar(hSlug, nameSlug)) score += 10;
+    if (domainSlug && similar(hSlug, domainSlug)) score += 10;
+    if (score > bestScore) {
+      bestScore = score;
+      best = handle;
+    }
+  }
+  return best ? `@${best}` : null;
 }
 
 const FB_RESERVED = new Set([
@@ -145,7 +211,10 @@ export async function enrichRawLead(raw: RawLead): Promise<RawLead> {
 
   if (html) {
     if (!out.instagram) {
-      const ig = extractInstagramHandle(html);
+      const ig = pickInstagramHandle(html, {
+        companyName: out.company_name,
+        websiteUrl: out.website,
+      });
       if (ig) {
         out.instagram = ig;
         out.instagram_active = true; // site aponta para o perfil — presença confirmada

@@ -1,6 +1,6 @@
 import "server-only";
 import { getDb, nowIso, saveDb } from "@/lib/store";
-import { uid } from "@/lib/utils";
+import { instagramHandle, uid } from "@/lib/utils";
 import { computeScore } from "@/services/scoring";
 import { STATUS_LABEL } from "@/services/stats";
 import { STAGE_IDS } from "@/lib/seed";
@@ -12,11 +12,14 @@ export function createLeadFromRaw(raw: RawLead, campaignId: string | null, userI
   const db = getDb();
   const now = nowIso();
 
+  // só persiste handle de Instagram que gera um link de perfil válido
+  const igHandle = instagramHandle(raw.instagram);
+
   const partial = {
     has_website: Boolean(raw.website),
     website_quality: raw.website_quality ?? (raw.website ? "desconhecido" : "nenhum"),
-    instagram: raw.instagram ?? null,
-    instagram_active: raw.instagram_active ?? false,
+    instagram: igHandle ? `@${igHandle}` : null,
+    instagram_active: igHandle ? (raw.instagram_active ?? false) : false,
     phone: raw.phone ?? null,
     whatsapp: raw.whatsapp ?? null,
     has_whatsapp: Boolean(raw.whatsapp),
