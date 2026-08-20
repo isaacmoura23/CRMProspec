@@ -203,6 +203,27 @@ export async function updateUserProfile(patch: { name?: string; email?: string }
   }
 }
 
+export async function completeOnboarding(data: {
+  company_name: string;
+  what_we_sell: string;
+  target_customers: string;
+  priority_niches: string[];
+  default_country: string;
+  communication_style: string;
+}): Promise<void> {
+  const db = getDb();
+  db.organization.name = data.company_name || db.organization.name;
+  db.company_profile.company_name = data.company_name || db.company_profile.company_name;
+  if (data.what_we_sell) db.company_profile.what_we_sell = data.what_we_sell;
+  if (data.target_customers) db.company_profile.target_customers = data.target_customers;
+  if (data.priority_niches.length) db.company_profile.priority_niches = data.priority_niches;
+  if (data.communication_style) db.company_profile.communication_style = data.communication_style;
+  if (data.default_country) db.settings.default_country = data.default_country;
+  db.onboarding_completed = true;
+  saveDb();
+  revalidatePath("/", "layout");
+}
+
 /* ---------------- Equipe ---------------- */
 
 export async function inviteMember(name: string, email: string, role: Role): Promise<{ error?: string }> {

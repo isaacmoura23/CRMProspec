@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { OPEN_PALETTE_EVENT } from "@/components/layout/command-palette";
 import { markAllNotificationsRead, markNotificationRead } from "@/actions/notifications";
+import { logout } from "@/actions/auth";
 import { timeAgo } from "@/lib/format";
 import type { AppNotification, User } from "@/types";
 import { cn } from "@/lib/utils";
@@ -119,6 +120,10 @@ export function Topbar({
             </DropdownMenuItem>
             <DropdownMenuItem asChild>
               <Link href="/equipe">Equipe</Link>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem destructive onClick={() => logout()}>
+              Sair
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

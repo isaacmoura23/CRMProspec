@@ -1,36 +1,78 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# ProspecAtlas — CRM de Prospecção Inteligente com IA
 
-## Getting Started
+> **"Nós ajudamos você a encontrar quem deveria virar seu próximo cliente."**
 
-First, run the development server:
+CRM de prospecção que **encontra** potenciais clientes, **enriquece** os dados, **analisa** a presença digital, **detecta problemas reais**, **calcula** o potencial comercial, **gera** abordagens personalizadas e **organiza** todo o funil — da descoberta ao fechamento.
+
+**Produção:** https://prospecatlas.vercel.app
+
+## Stack
+
+- **Frontend:** Next.js 16 (App Router) · React 19 · TypeScript · Tailwind CSS 4 · Radix UI · Lucide
+- **Backend:** Server Actions + jobs assíncronos in-process
+- **Dados:** modo demo com store local (`.data/db.json`) · produção Supabase/PostgreSQL (migrations em `/database`)
+- **IA:** OpenAI (opcional via `OPENAI_API_KEY`) com **engine determinístico de fallback** — o produto é 100% funcional sem nenhuma chave
+- **Deploy:** Vercel
+
+## Rodando localmente
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+# http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Sem variáveis de ambiente, o sistema sobe em **modo demo**: banco local com seed realista (16 leads, análises, pipeline, tarefas, conversas) e IA determinística. Copie `.env.example` para `.env.local` e preencha as chaves para ativar OpenAI, Google Places e Supabase.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Funcionalidades (MVP — Fase 1)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| Módulo | O que faz |
+| --- | --- |
+| **Dashboard** | KPIs com comparação de período, funil com taxas, "o que precisa da sua atenção", melhores oportunidades |
+| **Prospectar** | Busca por nicho/localização/características com tela de processamento **real** (encontrar → enriquecer → presença digital → analisar → pontuar) |
+| **Leads** | Tabela com filtros, ordenação, busca, ações em lote, colunas configuráveis, importação CSV (mapeamento + dedupe) e exportação |
+| **Perfil do lead** | Análise IA com problema concreto + impacto + solução, score explicável ("por que 87 pontos?"), timeline, notas |
+| **Abordagens IA** | 7 formatos (curta, consultiva, WhatsApp, DM, e-mail, roteiro de áudio, follow-up) e 4 ajustes de tom; nunca genérica — usa o problema identificado |
+| **Pipeline** | Kanban drag-and-drop com etapas editáveis, valor potencial e dias na etapa |
+| **Follow-ups** | Agrupados por vencimento, com contexto da última interação e sugestão da IA |
+| **Conversas** | Inbox unificado com classificação automática de respostas e resposta a objeções |
+| **Análises IA** | Assistente comercial que **consulta dados reais** ("quais leads devo abordar hoje?") |
+| **Campanhas / Automações / Propostas / Clientes / Relatórios / Equipe / Integrações / Configurações** | Gestão completa, incluindo o perfil "Sobre minha empresa" que contextualiza a IA |
 
-## Learn More
+## Arquitetura
 
-To learn more about Next.js, take a look at the following resources:
+```
+src/
+  ai/            prompts centralizados + cliente LLM + engine determinístico
+  actions/       server actions (validação Zod)
+  app/           rotas (App Router) — (app)/ é a área autenticada
+  components/    UI base + layout
+  features/      componentes por módulo (leads, pipeline, prospecção…)
+  jobs/          jobs assíncronos (prospecção com etapas reais)
+  lib/           store, auth, formatação, seed
+  providers/     fontes de prospecção (interface LeadProvider + registry)
+  services/      scoring, dedupe, estatísticas, lead-service
+  types/         modelo de domínio
+database/
+  migrations/    schema PostgreSQL/Supabase com RLS multi-tenant
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### Princípios de produto
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- **Score explicável:** todo score mostra os fatores que o compõem; histórico preservado.
+- **Problema concreto:** a análise nunca gera frases vagas — descreve uma situação específica e verificável do negócio.
+- **Curiosidade antes da solução:** a primeira abordagem não revela a solução completa.
+- **Sem dados inventados:** o assistente consulta o banco; confidence honesto quando faltam dados.
+- **Progresso real:** a tela de prospecção reflete os jobs efetivamente processados.
+- **Resposta pausa cadência:** lead respondeu → follow-ups automáticos pausam.
 
-## Deploy on Vercel
+## Produção com Supabase
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+1. Crie um projeto no Supabase e rode `database/migrations/0001_initial.sql` no SQL Editor (schema completo com RLS por organização).
+2. Preencha `NEXT_PUBLIC_SUPABASE_URL` e `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
+3. O isolamento multi-tenant é garantido por Row Level Security (`member_organizations()`).
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Roadmap
+
+- **Fase 2:** WhatsApp Business, Gmail/Calendar, cadências automatizadas com opt-out/LGPD, relatórios avançados.
+- **Fase 3:** SDR IA com tools ("procure 50 imobiliárias no Porto sem site"), scoring preditivo, billing SaaS.

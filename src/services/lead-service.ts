@@ -19,6 +19,7 @@ export function createLeadFromRaw(raw: RawLead, campaignId: string | null, userI
     instagram_active: raw.instagram_active ?? false,
     phone: raw.phone ?? null,
     whatsapp: raw.whatsapp ?? null,
+    has_whatsapp: Boolean(raw.whatsapp),
     email: raw.email ?? null,
     business_active: raw.business_active ?? true,
     catalog_size: raw.catalog_size ?? "desconhecido",
