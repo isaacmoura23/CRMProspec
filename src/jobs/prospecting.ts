@@ -1,4 +1,5 @@
 import "server-only";
+import { after } from "next/server";
 import { getDb, nowIso, saveDb } from "@/lib/store";
 import { uid } from "@/lib/utils";
 import { getActiveProvider } from "@/providers/registry";
@@ -68,8 +69,9 @@ export function createProspectingJob(params: SearchParams, userId: string): Pros
   db.prospecting_jobs.push(job);
   saveDb();
 
-  // dispara o processamento sem bloquear a resposta da action
-  void runProspectingJob(job.id, userId);
+  // roda após a resposta da action — em serverless (Vercel), after() mantém
+  // a função viva até o job terminar, em vez de arriscar o corte da execução
+  after(() => runProspectingJob(job.id, userId));
 
   return job;
 }

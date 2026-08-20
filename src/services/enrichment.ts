@@ -189,6 +189,10 @@ function assessWebsiteQuality(url: string, html: string): Lead["website_quality"
 export async function enrichRawLead(raw: RawLead): Promise<RawLead> {
   const out: RawLead = { ...raw };
 
+  // dados de demonstração são sintéticos e completos — os domínios não
+  // existem de verdade, então visitar seria lento e sem sentido
+  if (out.source === "diretorio" || out.source === "demo") return out;
+
   // WhatsApp por heurística de número móvel, mesmo sem visitar o site
   if (!out.whatsapp && looksLikeMobile(out.phone)) {
     out.whatsapp = out.phone;

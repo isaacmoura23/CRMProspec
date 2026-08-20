@@ -5,6 +5,9 @@ import { getActiveProvider } from "@/providers/registry";
 
 export const metadata: Metadata = { title: "Prospectar" };
 export const dynamic = "force-dynamic";
+// server actions desta página (job de prospecção com enriquecimento real)
+// precisam de mais tempo que o default do serverless
+export const maxDuration = 300;
 
 export default function ProspectarPage() {
   const provider = getActiveProvider();
