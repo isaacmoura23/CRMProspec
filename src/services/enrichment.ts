@@ -1,4 +1,5 @@
 import "server-only";
+import { instagramHandle } from "@/lib/utils";
 import type { Lead, RawLead } from "@/types";
 
 /**
@@ -40,17 +41,13 @@ async function fetchHtml(url: string): Promise<FetchResult> {
   }
 }
 
-const IG_RESERVED = new Set([
-  "p", "reel", "reels", "tv", "stories", "explore", "accounts", "share",
-  "about", "developer", "legal", "web", "direct",
-]);
-
 export function extractInstagramHandle(text: string): string | null {
-  const re = /instagram\.com\/([A-Za-z0-9_.]{2,30})/g;
+  // boundary antes do domínio evita capturar cdninstagram.com e afins
+  const re = /(?:^|[^\w.-])(?:www\.)?instagram\.com\/([A-Za-z0-9_.]{2,30})/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text))) {
-    const handle = m[1]!.replace(/\.$/, "");
-    if (!IG_RESERVED.has(handle.toLowerCase())) return `@${handle}`;
+    const handle = instagramHandle(m[1]);
+    if (handle) return `@${handle}`;
   }
   return null;
 }

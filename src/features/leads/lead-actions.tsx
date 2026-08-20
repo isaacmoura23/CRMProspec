@@ -15,6 +15,7 @@ import { useToast } from "@/components/ui/toast";
 import { analyzeLead, changeLeadStatus } from "@/actions/leads";
 import { registerContactMade } from "@/actions/ai";
 import { STATUS_LABEL } from "@/services/stats";
+import { instagramUrl } from "@/lib/utils";
 import { TaskDialog } from "@/features/tasks/task-dialog";
 import type { Lead, LeadStatus, User } from "@/types";
 
@@ -57,11 +58,11 @@ export function LeadHeaderActions({ lead, users }: { lead: Lead; users: User[] }
           <MessageCircle className="text-primary" /> WhatsApp
         </Button>
       )}
-      {lead.instagram && (
+      {instagramUrl(lead.instagram) && (
         <Button
           variant="secondary"
           size="sm"
-          onClick={() => openChannel("instagram", `https://instagram.com/${lead.instagram!.replace("@", "")}`)}
+          onClick={() => openChannel("instagram", instagramUrl(lead.instagram)!)}
         >
           <AtSign /> Instagram
         </Button>

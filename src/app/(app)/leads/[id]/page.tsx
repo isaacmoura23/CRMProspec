@@ -28,7 +28,7 @@ import { buildNextAction } from "@/features/leads/next-action";
 import { STATUS_LABEL } from "@/services/stats";
 import { temperatureLabel } from "@/services/scoring";
 import { formatDateTime, timeAgo } from "@/lib/format";
-import { cn } from "@/lib/utils";
+import { cn, instagramUrl } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Lead" };
 export const dynamic = "force-dynamic";
@@ -262,7 +262,7 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
                     icon={AtSign}
                     label="Instagram"
                     value={lead.instagram}
-                    href={lead.instagram ? `https://instagram.com/${lead.instagram.replace("@", "")}` : undefined}
+                    href={instagramUrl(lead.instagram) ?? undefined}
                   />
                   <DataRow icon={MapPin} label="Endereço" value={lead.address} />
                   <DataRow icon={Clock} label="Horário" value={lead.opening_hours} />

@@ -43,7 +43,7 @@ import {
 } from "@/actions/leads";
 import { STATUS_LABEL } from "@/services/stats";
 import type { Campaign, Lead, LeadStatus, User } from "@/types";
-import { cn } from "@/lib/utils";
+import { cn, instagramUrl } from "@/lib/utils";
 
 export interface LeadRow extends Lead {
   problem: string | null;
@@ -339,12 +339,12 @@ export function LeadsTable({
                             <Globe className="size-3.5" />
                           </span>
                         )}
-                        {lead.instagram ? (
+                        {instagramUrl(lead.instagram) ? (
                           <a
-                            href={`https://instagram.com/${lead.instagram.replace("@", "")}`}
+                            href={instagramUrl(lead.instagram)!}
                             target="_blank"
                             rel="noreferrer"
-                            title={lead.instagram}
+                            title={lead.instagram ?? ""}
                             className="text-muted-foreground hover:text-primary"
                           >
                             <AtSign className="size-3.5" />
