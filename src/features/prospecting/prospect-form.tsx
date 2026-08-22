@@ -32,7 +32,12 @@ import type { JobStep, ProspectingJob } from "@/types";
 import { NICHES } from "@/providers/directory-data";
 import { cn } from "@/lib/utils";
 
-const QUANTITIES = [10, 25, 50, 100];
+/**
+ * O Text Search do Google devolve no máximo 60 lugares por busca, então
+ * oferecer 100 era prometer o que a fonte real não entrega.
+ */
+const MAX_QUANTITY = 60;
+const QUANTITIES = [10, 25, 40, 60];
 
 const CHARACTERISTICS: Array<{ key: string; label: string }> = [
   { key: "hasPhone", label: "Possui telefone" },
@@ -119,8 +124,8 @@ export function ProspectForm({
       return;
     }
     const qty = quantity === -1 ? parseInt(customQty, 10) : quantity;
-    if (!qty || qty < 1 || qty > 100) {
-      setError("Quantidade inválida (1 a 100).");
+    if (!qty || qty < 1 || qty > MAX_QUANTITY) {
+      setError(`Quantidade inválida (1 a ${MAX_QUANTITY}).`);
       return;
     }
     setStarting(true);
@@ -273,7 +278,7 @@ export function ProspectForm({
                   <Input
                     type="number"
                     min={1}
-                    max={100}
+                    max={MAX_QUANTITY}
                     value={customQty}
                     onChange={(e) => setCustomQty(e.target.value)}
                     className="w-24"

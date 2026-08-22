@@ -12,7 +12,8 @@ const searchSchema = z.object({
   state: z.string().max(60).optional(),
   city: z.string().min(2).max(80),
   region: z.string().max(80).optional(),
-  quantity: z.number().int().min(1).max(100),
+  // Teto igual ao do Text Search do Google, a fonte real.
+  quantity: z.number().int().min(1).max(60),
   campaignName: z.string().max(80).optional(),
   filters: z.object({
     hasPhone: z.boolean().optional(),
