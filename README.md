@@ -37,7 +37,9 @@ Sem variáveis de ambiente, o sistema sobe em **modo demo**: banco local com see
 | **Follow-ups** | Agrupados por vencimento, com contexto da última interação e sugestão da IA |
 | **Conversas** | Inbox unificado com classificação automática de respostas e resposta a objeções |
 | **Análises IA** | Assistente comercial que **consulta dados reais** ("quais leads devo abordar hoje?") |
-| **Campanhas / Automações / Propostas / Clientes / Relatórios / Equipe / Integrações / Configurações** | Gestão completa, incluindo o perfil "Sobre minha empresa" que contextualiza a IA |
+| **Automações** | Motor gatilho → condição → ação que **executa de fato**: move etapa, cria tarefa, pausa cadência, notifica |
+| **Webhooks** | Entrega assinada (HMAC SHA-256) dos eventos do CRM, com teste manual, status da última entrega e retry |
+| **Campanhas / Propostas / Clientes / Relatórios / Equipe / Configurações** | Gestão completa, incluindo o perfil "Sobre minha empresa" que contextualiza a IA |
 
 ## Arquitetura
 
@@ -52,10 +54,31 @@ src/
   lib/           store, auth, formatação, seed
   providers/     fontes de prospecção (interface LeadProvider + registry)
   services/      scoring, dedupe, estatísticas, lead-service
+                 + barramento de eventos (events), motor de automações
+                   (automations) e entrega de webhooks (webhooks)
   types/         modelo de domínio
 database/
   migrations/    schema PostgreSQL/Supabase com RLS multi-tenant
 ```
+
+### Eventos, automações e webhooks
+
+Um único barramento (`services/events.ts`) alimenta os dois consumidores, a
+partir do catálogo em `services/event-catalog.ts`:
+
+- **Automações** rodam de forma síncrona, porque mudam dados que a resposta
+  já vai renderizar. As ações mutam o banco direto em vez de reentrar no
+  barramento — é o que impede uma regra de reagir à própria consequência.
+- **Webhooks** saem depois da resposta (`after()`), com timeout de 8 s, um
+  retry em 5xx e assinatura `X-ProspecAtlas-Signature: sha256=…` (HMAC do
+  corpo com o segredo mostrado na criação). Dez falhas seguidas desativam a
+  entrega; a tela mostra o status da última e permite um envio de teste.
+- O que a automação causa também vira evento para os webhooks, marcado com
+  `fromAutomation` para não reentrar no motor.
+
+`lead.stale` ("sem contato há 5 dias") não tem um instante em que ocorre.
+Sem agendador, a varredura roda no máximo a cada 5 minutos, disparada pela
+navegação.
 
 ### Princípios de produto
 
@@ -64,7 +87,8 @@ database/
 - **Curiosidade antes da solução:** a primeira abordagem não revela a solução completa.
 - **Sem dados inventados:** o assistente consulta o banco; confidence honesto quando faltam dados.
 - **Progresso real:** a tela de prospecção reflete os jobs efetivamente processados.
-- **Resposta pausa cadência:** lead respondeu → follow-ups automáticos pausam.
+- **Resposta pausa cadência:** lead respondeu → follow-ups automáticos pausam. É
+  uma automação editável, não uma regra fixa no código.
 
 ## Produção com Supabase
 

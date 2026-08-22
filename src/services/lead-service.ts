@@ -4,7 +4,9 @@ import { instagramHandle, uid } from "@/lib/utils";
 import { computeScore } from "@/services/scoring";
 import { STATUS_LABEL } from "@/services/stats";
 import { STAGE_IDS } from "@/lib/seed";
-import type { Activity, ActivityType, Lead, LeadStatus, RawLead } from "@/types";
+import { logActivity } from "@/services/activity";
+import { emitEvent } from "@/services/events";
+import type { Lead, LeadStatus, RawLead } from "@/types";
 import { contactNameMaybe } from "@/providers/directory-provider";
 
 /** Converte dado bruto de um provider em Lead persistido */
@@ -83,6 +85,12 @@ export function createLeadFromRaw(raw: RawLead, campaignId: string | null, userI
   });
   logActivity(lead.id, "lead_criado", `Lead encontrado via ${sourceLabel(raw.source)}`, userId);
   saveDb();
+  emitEvent("lead.created", lead);
+  // O score sai pronto de computeScore, então o gatilho de pontuação vale
+  // desde a criação — é o que faz "priorizar leads quentes" agir na
+  // prospecção, sem esperar uma recontagem manual.
+  emitEvent("lead.scored", lead);
+  saveDb();
   return lead;
 }
 
@@ -98,25 +106,9 @@ export function sourceLabel(source: string): string {
   return map[source] ?? source;
 }
 
-export function logActivity(
-  leadId: string,
-  type: ActivityType,
-  description: string,
-  userId: string | null
-): Activity {
-  const db = getDb();
-  const activity: Activity = {
-    id: uid("act"),
-    organization_id: db.organization.id,
-    lead_id: leadId,
-    type,
-    description,
-    user_id: userId,
-    created_at: nowIso(),
-  };
-  db.activities.push(activity);
-  return activity;
-}
+// Reexportado para os call sites já existentes; a implementação mora em
+// services/activity para o motor de automações poder usá-la sem ciclo.
+export { logActivity } from "@/services/activity";
 
 export function recomputeLeadScore(leadId: string): void {
   const db = getDb();
@@ -135,6 +127,8 @@ export function recomputeLeadScore(leadId: string): void {
     created_at: nowIso(),
   });
   logActivity(lead.id, "score_atualizado", `Score calculado: ${score} (${classification})`, null);
+  saveDb();
+  emitEvent("lead.scored", lead);
   saveDb();
 }
 
@@ -158,6 +152,21 @@ const STAGE_TO_STATUS: Record<string, LeadStatus> = Object.fromEntries(
   Object.entries(STATUS_TO_STAGE).map(([status, stage]) => [stage, status as LeadStatus])
 ) as Record<string, LeadStatus>;
 
+/**
+ * Eventos que decorrem de o lead ter mudado de posição no funil. Ganho e
+ * perda saem da etapa, não do status, porque as etapas terminais são
+ * editáveis pelo usuário.
+ */
+function emitStageEvents(lead: Lead): void {
+  const db = getDb();
+  emitEvent("lead.stage_changed", lead);
+  if (lead.status === "qualificado") emitEvent("lead.qualified", lead);
+  const stage = db.pipeline_stages.find((s) => s.id === lead.pipeline_stage_id);
+  if (stage?.is_won || lead.status === "fechado") emitEvent("deal.won", lead);
+  if (stage?.is_lost || lead.status === "perdido") emitEvent("deal.lost", lead);
+  saveDb();
+}
+
 export function setLeadStatus(leadId: string, status: LeadStatus, userId: string | null): void {
   const db = getDb();
   const lead = db.leads.find((l) => l.id === leadId);
@@ -171,6 +180,7 @@ export function setLeadStatus(leadId: string, status: LeadStatus, userId: string
   lead.updated_at = nowIso();
   logActivity(leadId, "status_alterado", `Status alterado para ${STATUS_LABEL[status]}`, userId);
   saveDb();
+  emitStageEvents(lead);
 }
 
 export function setLeadStage(leadId: string, stageId: string, userId: string | null): void {
@@ -190,4 +200,5 @@ export function setLeadStage(leadId: string, stageId: string, userId: string | n
     logActivity(leadId, "fechamento", `Negócio fechado — ${lead.company_name} agora é cliente`, userId);
   }
   saveDb();
+  emitStageEvents(lead);
 }

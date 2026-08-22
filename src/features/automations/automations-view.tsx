@@ -27,30 +27,22 @@ import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/ui/toast";
 import { createAutomation, deleteAutomation, toggleAutomation } from "@/actions/management";
+import {
+  ACTION_LABEL,
+  ACTIONS,
+  actionLabel,
+  AUTOMATION_TRIGGERS,
+  CONDITION_LABEL,
+  CONDITIONS,
+  conditionLabel,
+  EVENT_LABEL,
+  triggerLabel,
+  type ActionKey,
+  type ConditionKey,
+  type EventType,
+} from "@/services/event-catalog";
 import { timeAgo } from "@/lib/format";
 import type { AutomationRule } from "@/types";
-
-const TRIGGERS = [
-  "Lead criado",
-  "Lead recebe score",
-  "Lead respondeu",
-  "Reunião concluída",
-  "Proposta enviada",
-  "Proposta aceita",
-  "Lead sem contato há 5 dias",
-];
-
-const CONDITIONS = ["Sempre", "Score ≥ 80", "Score ≥ 60", "Sem site", "Nicho prioritário"];
-
-const ACTIONS = [
-  "Mover para Qualificado",
-  "Criar tarefa de contato",
-  "Adicionar à lista Alta prioridade",
-  "Pausar follow-ups automáticos",
-  "Criar tarefa para o vendedor",
-  "Criar tarefa \"Enviar proposta\"",
-  "Notificar responsável",
-];
 
 export function AutomationsView({ rules }: { rules: AutomationRule[] }) {
   const router = useRouter();
@@ -58,17 +50,20 @@ export function AutomationsView({ rules }: { rules: AutomationRule[] }) {
   const [open, setOpen] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const [name, setName] = React.useState("");
-  const [trigger, setTrigger] = React.useState(TRIGGERS[0]!);
-  const [condition, setCondition] = React.useState(CONDITIONS[0]!);
-  const [action1, setAction1] = React.useState(ACTIONS[0]!);
-  const [action2, setAction2] = React.useState<string>("__none__");
+  const [trigger, setTrigger] = React.useState<EventType>(AUTOMATION_TRIGGERS[0]!);
+  const [condition, setCondition] = React.useState<ConditionKey>(CONDITIONS[0]!);
+  const [action1, setAction1] = React.useState<ActionKey>(ACTIONS[0]!);
+  const [action2, setAction2] = React.useState<ActionKey | "__none__">("__none__");
 
   async function submit() {
     setSaving(true);
     try {
-      const actions = [action1, ...(action2 !== "__none__" ? [action2] : [])];
+      const actions: ActionKey[] = [
+        action1,
+        ...(action2 !== "__none__" && action2 !== action1 ? [action2] : []),
+      ];
       const res = await createAutomation({
-        name: name || `${trigger} → ${action1}`,
+        name: name.trim() || `${EVENT_LABEL[trigger]} → ${ACTION_LABEL[action1]}`,
         trigger,
         condition,
         actions,
@@ -81,6 +76,8 @@ export function AutomationsView({ rules }: { rules: AutomationRule[] }) {
       setOpen(false);
       setName("");
       router.refresh();
+    } catch {
+      toast("Não conseguimos criar a automação. Tente novamente.", "error");
     } finally {
       setSaving(false);
     }
@@ -107,36 +104,42 @@ export function AutomationsView({ rules }: { rules: AutomationRule[] }) {
               </div>
               <div className="rounded-xl border border-border bg-surface-hover/40 p-4 space-y-3">
                 <BuilderRow label="QUANDO">
-                  <Select value={trigger} onValueChange={setTrigger}>
+                  <Select value={trigger} onValueChange={(v) => setTrigger(v as EventType)}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      {TRIGGERS.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                      {AUTOMATION_TRIGGERS.map((t) => (
+                        <SelectItem key={t} value={t}>{EVENT_LABEL[t]}</SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </BuilderRow>
                 <BuilderRow label="SE">
-                  <Select value={condition} onValueChange={setCondition}>
+                  <Select value={condition} onValueChange={(v) => setCondition(v as ConditionKey)}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      {CONDITIONS.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                      {CONDITIONS.map((c) => (
+                        <SelectItem key={c} value={c}>{CONDITION_LABEL[c]}</SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </BuilderRow>
                 <BuilderRow label="ENTÃO">
-                  <Select value={action1} onValueChange={setAction1}>
+                  <Select value={action1} onValueChange={(v) => setAction1(v as ActionKey)}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      {ACTIONS.map((a) => <SelectItem key={a} value={a}>{a}</SelectItem>)}
+                      {ACTIONS.map((a) => (
+                        <SelectItem key={a} value={a}>{ACTION_LABEL[a]}</SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </BuilderRow>
                 <BuilderRow label="E">
-                  <Select value={action2} onValueChange={setAction2}>
+                  <Select value={action2} onValueChange={(v) => setAction2(v as ActionKey | "__none__")}>
                     <SelectTrigger><SelectValue placeholder="Nenhuma ação extra" /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="__none__">Nenhuma ação extra</SelectItem>
                       {ACTIONS.filter((a) => a !== action1).map((a) => (
-                        <SelectItem key={a} value={a}>{a}</SelectItem>
+                        <SelectItem key={a} value={a}>{ACTION_LABEL[a]}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -177,11 +180,13 @@ export function AutomationsView({ rules }: { rules: AutomationRule[] }) {
                 </div>
                 <p className="mt-1 flex flex-wrap items-center gap-1.5 text-[13px] text-muted-foreground">
                   <Zap className="size-3.5 text-warning" />
-                  <span className="font-medium text-foreground">{rule.trigger}</span>
+                  {/* Os rótulos vêm do catálogo, então regras gravadas no
+                      formato antigo continuam legíveis. */}
+                  <span className="font-medium text-foreground">{triggerLabel(rule.trigger)}</span>
                   <span>·</span>
-                  se <span className="font-medium text-foreground">{rule.condition}</span>
+                  se <span className="font-medium text-foreground">{conditionLabel(rule.condition)}</span>
                   <span>→</span>
-                  {rule.actions.join(" + ")}
+                  {rule.actions.map(actionLabel).join(" + ")}
                 </p>
                 <p className="mt-1 text-[11px] text-faint-foreground">
                   {rule.runs} execuções · criada {timeAgo(rule.created_at)}

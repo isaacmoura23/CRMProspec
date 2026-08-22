@@ -1,5 +1,6 @@
 import { getDb } from "@/lib/store";
 import { getCurrentUser } from "@/lib/auth";
+import { sweepStaleLeads } from "@/services/events";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Topbar } from "@/components/layout/topbar";
 import { CommandPalette } from "@/components/layout/command-palette";
@@ -9,6 +10,9 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const db = getDb();
   const user = await getCurrentUser();
+  // "Lead sem contato há N dias" não tem um instante em que ocorre — sem um
+  // agendador, a navegação é o que dispara a varredura (com intervalo mínimo).
+  sweepStaleLeads();
   const notifications = [...db.notifications]
     .filter((n) => n.user_id === user.id)
     .sort((a, b) => b.created_at.localeCompare(a.created_at));

@@ -6,6 +6,7 @@ import { getDb, nowIso, saveDb } from "@/lib/store";
 import { getCurrentUser } from "@/lib/auth";
 import { uid } from "@/lib/utils";
 import { logActivity } from "@/services/lead-service";
+import { emitEvent } from "@/services/events";
 import type { Task, TaskPriority, TaskType } from "@/types";
 
 const taskSchema = z.object({
@@ -55,10 +56,30 @@ export async function createTask(input: TaskInput): Promise<{ id: string } | { e
     }
   }
   saveDb();
+
+  emitEvent("task.created", d.lead_id ? db.leads.find((l) => l.id === d.lead_id) ?? null : null, {
+    payload: { task: taskPayload(task) },
+  });
+  saveDb();
+
   revalidatePath("/tarefas");
   revalidatePath("/follow-ups");
   if (d.lead_id) revalidatePath(`/leads/${d.lead_id}`);
   return { id: task.id };
+}
+
+/** Recorte da tarefa enviado no corpo do webhook. */
+function taskPayload(task: Task) {
+  return {
+    id: task.id,
+    lead_id: task.lead_id,
+    type: task.type,
+    title: task.title,
+    due_date: task.due_date,
+    priority: task.priority,
+    assigned_to: task.assigned_to,
+    completed: task.completed,
+  };
 }
 
 export async function toggleTask(taskId: string): Promise<void> {
@@ -79,8 +100,20 @@ export async function toggleTask(taskId: string): Promise<void> {
     }
   }
   saveDb();
+
+  if (task.completed) {
+    const lead = task.lead_id ? db.leads.find((l) => l.id === task.lead_id) ?? null : null;
+    emitEvent("task.completed", lead, { payload: { task: taskPayload(task) } });
+    // "Reunião concluída" é o gatilho que dispara a tarefa de proposta.
+    if (task.type === "reuniao") {
+      emitEvent("meeting.completed", lead, { payload: { task: taskPayload(task) } });
+    }
+    saveDb();
+  }
+
   revalidatePath("/tarefas");
   revalidatePath("/follow-ups");
+  revalidatePath("/leads");
   if (task.lead_id) revalidatePath(`/leads/${task.lead_id}`);
 }
 

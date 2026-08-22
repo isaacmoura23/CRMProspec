@@ -6,6 +6,9 @@ import { getDb, nowIso, saveDb } from "@/lib/store";
 import { getAdminUser, getCurrentUser } from "@/lib/auth";
 import { uid } from "@/lib/utils";
 import { logActivity } from "@/services/lead-service";
+import { emitEvent } from "@/services/events";
+import { deliverTestEvent, generateWebhookSecret } from "@/services/webhooks";
+import { ACTIONS, CONDITIONS, EVENT_TYPES, isEventType } from "@/services/event-catalog";
 import type { CompanyProfile, ProposalStatus, Role } from "@/types";
 
 /* ---------------- Campanhas ---------------- */
@@ -129,21 +132,36 @@ export async function setProposalStatus(id: string, status: ProposalStatus): Pro
     lead.updated_at = nowIso();
   }
   saveDb();
+
+  if (lead) {
+    const proposal = { id: p.id, service: p.service, value: p.value, discount: p.discount, status };
+    if (status === "enviada") emitEvent("proposal.sent", lead, { payload: { proposal } });
+    if (status === "aceita") {
+      emitEvent("proposal.accepted", lead, { payload: { proposal } });
+      emitEvent("deal.won", lead, { payload: { proposal } });
+    }
+    if (status === "recusada") emitEvent("deal.lost", lead, { payload: { proposal } });
+    saveDb();
+  }
+
   revalidatePath("/propostas");
   revalidatePath("/pipeline");
   revalidatePath("/clientes");
   // O status da proposta também move o status do lead.
   revalidatePath("/leads");
+  revalidatePath("/tarefas");
   revalidatePath(`/leads/${p.lead_id}`);
 }
 
 /* ---------------- Automações ---------------- */
 
+// Gatilho, condição e ações agora são chaves do catálogo, não texto livre:
+// só assim o motor reconhece o que a tela gravou.
 const automationSchema = z.object({
-  name: z.string().min(3).max(100),
-  trigger: z.string().min(3),
-  condition: z.string().min(1),
-  actions: z.array(z.string().min(3)).min(1),
+  name: z.string().trim().min(3).max(100),
+  trigger: z.enum(EVENT_TYPES),
+  condition: z.enum(CONDITIONS),
+  actions: z.array(z.enum(ACTIONS)).min(1).max(4),
 });
 
 export type AutomationInput = z.infer<typeof automationSchema>;
@@ -383,24 +401,70 @@ function isPublicHttpUrl(raw: string): boolean {
   return true;
 }
 
-export async function createWebhook(url: string, events: string[]): Promise<{ error?: string }> {
+export async function createWebhook(
+  url: string,
+  events: string[]
+): Promise<{ error?: string; secret?: string }> {
   if (!(await getAdminUser())) return { error: "Apenas owner ou admin podem criar webhooks." };
   if (!isPublicHttpUrl(url)) {
     return { error: "Informe uma URL pública válida (http/https, sem endereços internos)." };
   }
-  if (events.length === 0) return { error: "Selecione pelo menos um evento." };
+  const valid = events.filter(isEventType);
+  if (valid.length === 0) return { error: "Selecione pelo menos um evento." };
   const db = getDb();
+  // O segredo assina cada entrega e só é exibido no momento da criação.
+  const secret = generateWebhookSecret();
   db.webhooks.push({
     id: uid("wh"),
     organization_id: db.organization.id,
     url,
-    events,
+    events: valid,
     active: true,
     created_at: nowIso(),
+    secret,
+    last_status: null,
+    last_error: null,
+    last_delivery_at: null,
+    consecutive_failures: 0,
   });
   saveDb();
   revalidatePath("/integracoes");
-  return {};
+  return { secret };
+}
+
+/**
+ * Envia uma entrega de teste e devolve o resultado, para o usuário conseguir
+ * verificar a integração sem precisar provocar um evento real.
+ */
+export async function testWebhook(id: string): Promise<{ ok: boolean; detail: string }> {
+  if (!(await getAdminUser())) return { ok: false, detail: "Sem permissão." };
+  const db = getDb();
+  const hook = db.webhooks.find((w) => w.id === id);
+  if (!hook) return { ok: false, detail: "Webhook não encontrado." };
+
+  await deliverTestEvent(hook);
+
+  const updated = db.webhooks.find((w) => w.id === id)!;
+  revalidatePath("/integracoes");
+  const ok = updated.last_status !== null && updated.last_status! >= 200 && updated.last_status! < 300;
+  return {
+    ok,
+    detail: ok
+      ? `Entregue com HTTP ${updated.last_status}.`
+      : updated.last_error ?? "Falha na entrega.",
+  };
+}
+
+export async function toggleWebhook(id: string): Promise<void> {
+  if (!(await getAdminUser())) return;
+  const db = getDb();
+  const hook = db.webhooks.find((w) => w.id === id);
+  if (!hook) return;
+  hook.active = !hook.active;
+  // Reativar manualmente zera o contador que causou a desativação automática.
+  if (hook.active) hook.consecutive_failures = 0;
+  saveDb();
+  revalidatePath("/integracoes");
 }
 
 export async function deleteWebhook(id: string): Promise<void> {

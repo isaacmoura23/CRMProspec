@@ -345,6 +345,13 @@ export interface Webhook {
   events: string[];
   active: boolean;
   created_at: string;
+  /** Assina o corpo em X-ProspecAtlas-Signature (HMAC SHA-256). */
+  secret?: string;
+  /** Resultado da última entrega — alimenta o status exibido na tela. */
+  last_status?: number | null;
+  last_error?: string | null;
+  last_delivery_at?: string | null;
+  consecutive_failures?: number;
 }
 
 /* ---------- Prospecção / Jobs ---------- */

@@ -6,6 +6,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { uid } from "@/lib/utils";
 import { aiClassifyResponse } from "@/ai";
 import { logActivity } from "@/services/lead-service";
+import { emitEvent } from "@/services/events";
 
 export async function sendMessage(conversationId: string, content: string): Promise<void> {
   if (!content.trim()) return;
@@ -81,8 +82,6 @@ export async function simulateInbound(conversationId: string, content: string): 
         lead.stage_entered_at = nowIso();
       }
     }
-    // resposta recebida → pausa follow-ups automáticos pendentes
-    lead.next_follow_up_at = null;
     lead.updated_at = nowIso();
     logActivity(lead.id, "resposta_recebida", `Lead respondeu: "${content.trim().slice(0, 80)}"`, null);
 
@@ -99,8 +98,25 @@ export async function simulateInbound(conversationId: string, content: string): 
     });
   }
   saveDb();
+
+  // A pausa da cadência ao receber resposta é hoje uma automação ("Pausar
+  // follow-ups automáticos"), não uma regra fixa no código: quem quiser
+  // manter a cadência rodando pode desligá-la em /automacoes.
+  if (lead) {
+    emitEvent("lead.replied", lead, {
+      payload: {
+        message: content.trim(),
+        classification: output.classification,
+        conversation_id: conversationId,
+      },
+    });
+    saveDb();
+  }
+
   revalidatePath("/conversas");
   revalidatePath("/leads");
+  revalidatePath("/tarefas");
+  revalidatePath("/follow-ups");
   // A notificação criada aparece no sino da topbar, montada no layout.
   revalidatePath("/", "layout");
 }
