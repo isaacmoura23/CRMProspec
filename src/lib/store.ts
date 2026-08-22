@@ -87,21 +87,66 @@ function load(): Database {
  * Em ambientes serverless (ex.: Vercel) o filesystem do projeto é
  * somente leitura: o banco demo passa a viver apenas em memória e é
  * regenerado a cada cold start — suficiente para demonstração.
+ *
+ * Fora desses ambientes a falha costuma ser passageira (diretório removido,
+ * antivírus segurando o arquivo, disco momentaneamente cheio). Desligar a
+ * gravação para sempre no primeiro erro fazia o processo seguir perdendo
+ * dados em silêncio até ser reiniciado, então só o erro que indica
+ * filesystem realmente somente leitura é definitivo; o resto é reavaliado.
  */
+const WRITE_RETRY_MS = 30_000;
+/** Códigos em que o destino está momentaneamente travado, não proibido. */
+const LOCKED_CODES = new Set(["EPERM", "EACCES", "EBUSY"]);
+
 let fsWritable = true;
+let retryWritesAt = 0;
+
+/**
+ * Publica o snapshot.
+ *
+ * O caminho normal é escrever num temporário e renomear, que é atômico. No
+ * Windows esse rename falha com EPERM/EBUSY quando algo (antivírus, o
+ * indexador, o watcher do dev server) está com o arquivo aberto naquele
+ * instante — situação passageira e comum, não uma proibição. Nesse caso
+ * escrevemos por cima: abre mão da atomicidade para não perder a escrita.
+ */
+function writeSnapshot(json: string) {
+  const tmp = `${DB_FILE}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, json, "utf-8");
+  try {
+    fs.renameSync(tmp, DB_FILE);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === undefined || !LOCKED_CODES.has(code)) throw err;
+    fs.writeFileSync(DB_FILE, json, "utf-8");
+    fs.rmSync(tmp, { force: true });
+  }
+}
 
 function persist(db: Database) {
-  if (!fsWritable) return;
+  if (!fsWritable && Date.now() < retryWritesAt) return;
   try {
     if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-    // Temporário por processo: dois workers do `next dev` gravando no mesmo
-    // nome intercalariam bytes e o rename publicaria um JSON truncado.
-    const tmp = `${DB_FILE}.${process.pid}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(db, null, 2), "utf-8");
-    fs.renameSync(tmp, DB_FILE);
-  } catch {
+    writeSnapshot(JSON.stringify(db, null, 2));
+    if (!fsWritable) {
+      fsWritable = true;
+      console.info("[store] gravação em disco restabelecida");
+    }
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    // Só um filesystem declaradamente somente leitura (serverless) é
+    // definitivo; qualquer outra falha é reavaliada, senão o processo segue
+    // perdendo dados em silêncio até ser reiniciado.
+    const permanent = code === "EROFS";
+    if (fsWritable) {
+      console.warn(
+        permanent
+          ? "[store] filesystem somente leitura — operando em memória"
+          : `[store] falha ao gravar (${code ?? "erro"}) — nova tentativa em ${WRITE_RETRY_MS / 1000}s`
+      );
+    }
     fsWritable = false;
-    console.warn("[store] filesystem somente leitura — operando em memória");
+    retryWritesAt = permanent ? Number.POSITIVE_INFINITY : Date.now() + WRITE_RETRY_MS;
   }
 }
 

@@ -113,10 +113,19 @@ async function runProspectingJob(jobId: string, userId: string): Promise<void> {
 
     // nunca repetir empresas de buscas anteriores, mesmo que os leads tenham sido removidos
     db.seen_source_ids ??= [];
+    // Os nomes já presentes nesta cidade são a exclusão que mais rende: no
+    // provider de demonstração, e-mail, site e Instagram derivam do nome, e
+    // um nome repetido colidiria de quatro formas no dedupe.
+    const city = job.params.city.trim().toLowerCase();
+    const knownNames = db.leads
+      .filter((l) => l.city.trim().toLowerCase() === city)
+      .map((l) => l.company_name);
+
     const raws = await provider.search({
       ...job.params,
       quantity: fetchTarget,
       excludeSourceIds: db.seen_source_ids,
+      excludeNames: knownNames,
     });
 
     const finding = step("finding");

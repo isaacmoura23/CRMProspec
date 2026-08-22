@@ -1,6 +1,15 @@
 import type { RawLead, SearchParams } from "@/types";
 import type { LeadProvider } from "@/providers/types";
-import { customNiche, FIRST_NAMES, nicheByKey, OPENING_HOURS, STREET_NAMES } from "@/providers/directory-data";
+import {
+  customNiche,
+  FIRST_NAMES,
+  GENERIC_CORES,
+  nicheByKey,
+  OPENING_HOURS,
+  STREET_NAMES,
+  SURNAMES,
+  type NicheProfile,
+} from "@/providers/directory-data";
 
 /**
  * Provider de diretório empresarial (modo demonstração).
@@ -49,6 +58,63 @@ function slugify(name: string): string {
     .slice(0, 24);
 }
 
+/**
+ * Miolo do nome da empresa.
+ *
+ * A lista fixa de `cores` dava só algumas dezenas de nomes por nicho, e como
+ * e-mail, site e Instagram são derivados do nome, todo nome repetido colidia
+ * de quatro formas no dedupe — a segunda busca no mesmo nicho e cidade já
+ * entregava bem menos que o pedido, e a terceira podia não entregar nada.
+ * Compor com nomes e sobrenomes leva o espaço de dezenas para milhares.
+ */
+function nameCore(niche: NicheProfile): string {
+  if (niche.personName) {
+    return `${pick(FIRST_NAMES)} ${pick(SURNAMES)}`;
+  }
+  const roll = rand();
+  // Sociedade familiar ("Andrade & Nogueira") — duas listas cruzadas, é o
+  // que mais amplia o espaço.
+  if (roll < 0.2) {
+    const a = pick(SURNAMES);
+    let b = pick(SURNAMES);
+    while (b === a) b = pick(SURNAMES);
+    return `${a} & ${b}`;
+  }
+  // Negócio de família ("Imobiliária Andrade") é tão comum quanto nome de
+  // fantasia, então o sobrenome entra como alternativa em qualquer nicho.
+  if (roll < 0.5) return pick(SURNAMES);
+  if (roll < 0.75) return pick(GENERIC_CORES);
+  return pick(niche.nameParts.cores);
+}
+
+/** "Imobiliária" e "Negócios Imobiliários" compartilham a raiz "imobilia". */
+function sharesRoot(a: string, b: string): boolean {
+  if (!a || !b) return false;
+  const root = normalizeName(a).replace(/\s+/g, "").slice(0, 8);
+  return root.length >= 5 && normalizeName(b).replace(/\s+/g, "").includes(root);
+}
+
+/** Mesma normalização usada pelo dedupe, para os dois concordarem. */
+function normalizeName(name: string): string {
+  return name
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+/**
+ * Identidade estável da empresa dentro da cidade.
+ *
+ * Antes o id terminava em um número aleatório, o que tornava
+ * `excludeSourceIds` inútil: o mesmo negócio voltava a ser sorteado com um id
+ * diferente a cada busca, e só era barrado lá na frente pelo dedupe.
+ */
+function sourceIdFor(name: string, city: string): string {
+  return `dir_${slugify(city)}_${slugify(name)}`;
+}
+
 export class DirectoryProvider implements LeadProvider {
   id = "diretorio";
   name = "Diretório empresarial";
@@ -62,17 +128,35 @@ export class DirectoryProvider implements LeadProvider {
     const isPT = params.country.toLowerCase().includes("portugal");
     const results: RawLead[] = [];
     const usedNames = new Set<string>();
+    // Empresas já entregues em buscas anteriores: pular aqui evita gastar a
+    // busca inteira com candidatos que o dedupe descartaria depois.
+    const excludedIds = new Set(params.excludeSourceIds ?? []);
+    const excludedNames = new Set((params.excludeNames ?? []).map(normalizeName));
 
-    // gera um excedente para compensar os descartados pelos filtros
-    const attempts = params.quantity * 6;
+    // Gera um excedente para compensar os descartados pelos filtros. O teto é
+    // alto porque, com a base já povoada, boa parte dos sorteios cai em
+    // empresas conhecidas — sem isso a busca devolvia menos do que o pedido.
+    const attempts = Math.max(params.quantity * 25, 400);
 
     for (let i = 0; i < attempts && results.length < params.quantity; i++) {
-      const prefix = pick(niche.nameParts.prefixes);
-      const core = pick(niche.nameParts.cores);
+      const core = nameCore(niche);
       const suffix = pick(niche.nameParts.suffixes);
+      // Prefixo e sufixo da mesma família geram "Imobiliária Pantanal
+      // Imobiliária"; nesses casos o prefixo cai.
+      const rawPrefix = pick(niche.nameParts.prefixes);
+      let prefix = sharesRoot(rawPrefix, suffix) ? "" : rawPrefix;
+      // Prefixo e sufixo vazios deixariam só o miolo ("Peixoto"), que não
+      // identifica o ramo; nesse caso o prefixo é obrigatório.
+      if (!prefix && !suffix) {
+        prefix = niche.nameParts.prefixes.find(Boolean) ?? "";
+      }
       const name = [prefix, core, suffix].filter(Boolean).join(" ").trim();
       if (usedNames.has(name)) continue;
       usedNames.add(name);
+
+      if (excludedNames.has(normalizeName(name))) continue;
+      const sourceId = sourceIdFor(name, params.city);
+      if (excludedIds.has(sourceId)) continue;
 
       const f = params.filters;
 
@@ -122,7 +206,7 @@ export class DirectoryProvider implements LeadProvider {
         rating,
         opening_hours: pick(OPENING_HOURS),
         source: "diretorio",
-        source_id: `dir_${slug}_${Math.floor(rand() * 100000)}`,
+        source_id: sourceId,
         website_quality: websiteQuality,
         instagram_active: instagramActive,
         marketing_signals: strongSocial || chance(0.25),
@@ -130,12 +214,6 @@ export class DirectoryProvider implements LeadProvider {
         catalog_size: pick(niche.catalogBias),
       });
 
-      // nome de contato em ~60% dos casos
-      if (chance(0.6)) {
-        results[results.length - 1] = {
-          ...results[results.length - 1]!,
-        };
-      }
     }
 
     // simula latência de rede da fonte externa

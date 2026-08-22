@@ -449,7 +449,11 @@ function JobProgress({
                 ` ${job.filtered} empresas fora do perfil escolhido foram descartadas.`}
               {job.found_lead_ids.length < job.params.quantity &&
                 job.status === "completed" &&
-                " A região pode ter menos empresas novas que combinam com os filtros — tente ampliar a busca."}
+                // Distingue "acabaram as empresas novas aqui" de "os filtros
+                // são restritivos demais" — a saída para cada caso é outra.
+                ((job.filtered ?? 0) > job.duplicates
+                  ? " Faltou completar o pedido porque muitas empresas não passaram nos filtros — tente afrouxar algum critério."
+                  : ` Já prospectamos praticamente todas as empresas de ${job.params.niche} em ${job.params.city}. Tente outra cidade ou outro nicho.`)}
             </div>
           )}
 

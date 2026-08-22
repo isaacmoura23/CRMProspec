@@ -365,6 +365,13 @@ export interface SearchParams {
   quantity: number;
   /** IDs de origem (ex.: place_id) já retornados em buscas anteriores — nunca repetir */
   excludeSourceIds?: string[];
+  /**
+   * Nomes de empresas que já estão na base para esta cidade. Um provider
+   * gerado (o diretório de demonstração) usa isto para não propor de novo
+   * um negócio que o dedupe descartaria adiante — e, diferente do
+   * source_id, funciona também para leads gravados por versões anteriores.
+   */
+  excludeNames?: string[];
   filters: {
     hasPhone?: boolean;
     hasWhatsapp?: boolean;

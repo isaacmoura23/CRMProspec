@@ -12,6 +12,12 @@ export interface NicheProfile {
   catalogBias: Array<"nenhum" | "pequeno" | "medio" | "grande">;
   /** probabilidade de ter site (0–1) */
   websiteRate: number;
+  /**
+   * Nichos em que o negócio leva o nome do profissional (advogado, personal,
+   * corretor). O miolo do nome vem de FIRST_NAMES × SURNAMES em vez da lista
+   * fixa de `cores`, o que multiplica o número de empresas distintas.
+   */
+  personName?: boolean;
 }
 
 export const NICHES: NicheProfile[] = [
@@ -53,6 +59,7 @@ export const NICHES: NicheProfile[] = [
     ],
     catalogBias: ["pequeno", "medio", "medio"],
     websiteRate: 0.2,
+    personName: true,
   },
   {
     key: "loja_veiculos",
@@ -125,6 +132,7 @@ export const NICHES: NicheProfile[] = [
     ],
     catalogBias: ["nenhum", "pequeno"],
     websiteRate: 0.1,
+    personName: true,
   },
   {
     key: "nutricionista",
@@ -143,6 +151,7 @@ export const NICHES: NicheProfile[] = [
     ],
     catalogBias: ["nenhum", "pequeno"],
     websiteRate: 0.15,
+    personName: true,
   },
   {
     key: "arquiteto",
@@ -179,6 +188,7 @@ export const NICHES: NicheProfile[] = [
     ],
     catalogBias: ["nenhum", "pequeno"],
     websiteRate: 0.5,
+    personName: true,
   },
   {
     key: "hotel",
@@ -258,20 +268,30 @@ export function nicheByKey(key: string): NicheProfile | undefined {
   return NICHES.find((n) => n.key === key);
 }
 
-/** Nicho customizado digitado pelo usuário */
+/**
+ * Nicho customizado digitado pelo usuário.
+ *
+ * O texto digitado vira nome de empresa e rótulo de segmento, então é
+ * normalizado: "petshop" viraria "Superior petshop & Cia" na tabela de leads.
+ */
 export function customNiche(label: string): NicheProfile {
+  const clean = label.trim().replace(/\s+/g, " ");
+  const titled = clean
+    .split(" ")
+    .map((w) => (w.length > 2 ? w[0]!.toUpperCase() + w.slice(1) : w))
+    .join(" ");
   return {
     key: "custom",
-    label,
+    label: titled,
     nameParts: {
-      prefixes: ["", "Casa", "Grupo", "Studio"],
+      prefixes: ["Casa", "Grupo", "Studio", ""],
       cores: [
         "Primavera", "Central", "Ideal", "Moderna", "Clássica", "Real",
         "Superior", "Master", "Única", "Seleta", "Notável", "Autêntica",
       ],
-      suffixes: [label, `${label} & Cia`, "Serviços", ""],
+      suffixes: [titled, `${titled} & Cia`, "Serviços", ""],
     },
-    descriptions: [`Empresa de ${label.toLowerCase()} com atendimento na região.`],
+    descriptions: [`Empresa de ${clean.toLowerCase()} com atendimento na região.`],
     catalogBias: ["pequeno", "medio"],
     websiteRate: 0.3,
   };
@@ -286,6 +306,38 @@ export const STREET_NAMES = [
 export const FIRST_NAMES = [
   "João", "Maria", "Pedro", "Ana", "Carlos", "Sofia", "Tiago", "Inês",
   "Rui", "Marta", "Nuno", "Catarina", "Fábio", "Teresa", "Vasco", "Rita",
+  "Ricardo", "Beatriz", "Miguel", "Carla", "Paulo", "Juliana", "André", "Fernanda",
+  "Bruno", "Patrícia", "Diogo", "Helena", "Thiago", "Larissa", "Felipe", "Camila",
+  "Rodrigo", "Vanessa", "Gustavo", "Aline", "Marina", "Renato", "Leonardo", "Priscila",
+  "Eduardo", "Mariana", "Rafael", "Letícia", "Vinícius", "Débora", "Marcelo", "Cristina",
+];
+
+/**
+ * Sobrenomes usados tanto nos nichos de profissional liberal quanto como
+ * miolo alternativo de nomes de empresa ("Imobiliária Andrade"), que é uma
+ * forma comum de batizar negócio familiar no Brasil.
+ */
+export const SURNAMES = [
+  "Andrade", "Barbosa", "Cardoso", "Duarte", "Esteves", "Fonseca", "Guimarães",
+  "Henriques", "Inácio", "Jardim", "Lacerda", "Macedo", "Nogueira", "Oliveira",
+  "Peixoto", "Queirós", "Ribeiro", "Sampaio", "Tavares", "Vasconcelos", "Xavier",
+  "Almeida", "Bastos", "Carvalho", "Dantas", "Falcão", "Gonçalves", "Moreira",
+  "Pacheco", "Rocha", "Siqueira", "Teixeira", "Vieira", "Amorim", "Braga",
+  "Coutinho", "Meireles", "Antunes", "Aragão", "Muniz", "Prado", "Leal",
+  "Pires", "Moura", "Sales", "Fontes", "Vidal", "Bonfim",
+];
+
+/**
+ * Miolos neutros que combinam com qualquer ramo — entram na rotação junto
+ * com os nomes específicos do nicho para ampliar o espaço de empresas
+ * distintas por cidade.
+ */
+export const GENERIC_CORES = [
+  "Alvorada", "Bandeirantes", "Cristal", "Diamante", "Esplanada", "Guararapes",
+  "Ipanema", "Jequitibá", "Laguna", "Marajó", "Navegantes", "Oceânica",
+  "Pantanal", "Quaresmeira", "Rio Branco", "Serra Azul", "Tijuca", "Umuarama",
+  "Vitória Régia", "Ybirá", "Caravela", "Farol", "Gaivota", "Horizonte Novo",
+  "Itapema", "Jurerê", "Ipê Amarelo", "Cedro", "Araucária", "Bougainville",
 ];
 
 export const OPENING_HOURS = [
