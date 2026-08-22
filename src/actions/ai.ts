@@ -6,15 +6,24 @@ import { getCurrentUser } from "@/lib/auth";
 import { uid } from "@/lib/utils";
 import { aiClassifyResponse, aiGenerateOutreach, aiHandleObjection } from "@/ai";
 import { logActivity } from "@/services/lead-service";
-import { CLASSIFICATION_LABEL } from "@/ai/schemas";
+import { CLASSIFICATION_LABEL, messageFormatSchema, messageToneSchema } from "@/ai/schemas";
 import type { AIGeneration, MessageFormat, MessageTone } from "@/types";
 
 export async function generateOutreach(
   leadId: string,
-  format: MessageFormat,
-  tone: MessageTone,
-  variant: number
+  formatInput: MessageFormat,
+  toneInput: MessageTone,
+  variantInput: number
 ): Promise<{ generation: AIGeneration } | { error: string }> {
+  const parsedFormat = messageFormatSchema.safeParse(formatInput);
+  const parsedTone = messageToneSchema.safeParse(toneInput);
+  if (!parsedFormat.success || !parsedTone.success) {
+    return { error: "Formato ou tom de mensagem inválido." };
+  }
+  const format = parsedFormat.data;
+  const tone = parsedTone.data;
+  const variant = Number.isFinite(variantInput) ? Math.max(0, Math.trunc(variantInput)) : 0;
+
   const db = getDb();
   const lead = db.leads.find((l) => l.id === leadId);
   if (!lead) return { error: "Lead não encontrado." };
@@ -60,6 +69,7 @@ export async function generateOutreach(
     db.ai_generations.push(generation);
     logActivity(leadId, "mensagem_gerada", `Abordagem gerada (${format})`, user.id);
     saveDb();
+    revalidatePath(`/leads/${leadId}`);
     return { generation };
   } catch (err) {
     console.error("[ai] geração falhou:", err);
@@ -68,11 +78,13 @@ export async function generateOutreach(
 }
 
 export async function saveGeneration(generationId: string): Promise<void> {
+  await getCurrentUser();
   const db = getDb();
   const gen = db.ai_generations.find((g) => g.id === generationId);
   if (gen) {
     gen.saved = true;
     saveDb();
+    revalidatePath(`/leads/${gen.lead_id}`);
   }
 }
 
@@ -107,6 +119,7 @@ export async function registerContactMade(leadId: string, channel: string): Prom
 export async function classifyIncoming(
   messageId: string
 ): Promise<{ label: string } | { error: string }> {
+  await getCurrentUser();
   const db = getDb();
   const msg = db.messages.find((m) => m.id === messageId);
   if (!msg) return { error: "Mensagem não encontrada." };
@@ -121,6 +134,7 @@ export async function suggestObjectionResponse(
   leadId: string,
   objection: string
 ): Promise<{ suggestion: string } | { error: string }> {
+  await getCurrentUser();
   const db = getDb();
   const lead = db.leads.find((l) => l.id === leadId);
   if (!lead) return { error: "Lead não encontrado." };

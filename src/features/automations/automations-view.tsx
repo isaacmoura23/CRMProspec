@@ -154,6 +154,14 @@ export function AutomationsView({ rules }: { rules: AutomationRule[] }) {
       </div>
 
       <div className="space-y-3">
+        {rules.length === 0 && (
+          <Card>
+            <CardContent className="p-6 text-center text-[13px] text-muted-foreground">
+              Nenhuma automação criada. Automatize movimentos repetitivos: priorizar leads
+              quentes, pausar cadências ao receber resposta, criar tarefas após reuniões.
+            </CardContent>
+          </Card>
+        )}
         {rules.map((rule) => (
           <Card key={rule.id}>
             <CardContent className="flex items-start gap-4 p-4">
@@ -182,20 +190,30 @@ export function AutomationsView({ rules }: { rules: AutomationRule[] }) {
               <div className="flex items-center gap-2">
                 <Switch
                   checked={rule.active}
+                  aria-label={`${rule.active ? "Desativar" : "Ativar"} a automação ${rule.name}`}
                   onCheckedChange={async () => {
-                    await toggleAutomation(rule.id);
-                    router.refresh();
+                    try {
+                      await toggleAutomation(rule.id);
+                      router.refresh();
+                    } catch {
+                      toast("Não conseguimos alterar a automação. Tente novamente.", "error");
+                    }
                   }}
                 />
                 <button
+                  type="button"
+                  aria-label={`Excluir a automação ${rule.name}`}
                   onClick={async () => {
-                    if (confirm("Excluir esta automação?")) {
+                    if (!confirm("Excluir esta automação?")) return;
+                    try {
                       await deleteAutomation(rule.id);
                       toast("Automação excluída.");
                       router.refresh();
+                    } catch {
+                      toast("Não conseguimos excluir a automação. Tente novamente.", "error");
                     }
                   }}
-                  className="rounded p-1 text-faint-foreground hover:bg-danger-soft hover:text-danger cursor-pointer"
+                  className="rounded p-1 text-faint-foreground hover:bg-danger-soft hover:text-danger cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
                 >
                   <Trash2 className="size-4" />
                 </button>

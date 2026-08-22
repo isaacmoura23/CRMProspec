@@ -32,8 +32,10 @@ export function Topbar({
   return (
     <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-border bg-background/80 px-4 backdrop-blur-sm lg:px-8">
       <button
+        type="button"
+        aria-label="Abrir busca global"
         onClick={() => window.dispatchEvent(new Event(OPEN_PALETTE_EVENT))}
-        className="flex h-8 w-full max-w-xs items-center gap-2.5 rounded-lg border border-border bg-surface px-3 text-[13px] text-faint-foreground shadow-sm transition-colors hover:border-border-strong cursor-pointer"
+        className="flex h-8 w-full max-w-xs items-center gap-2.5 rounded-lg border border-border bg-surface px-3 text-[13px] text-faint-foreground shadow-sm transition-colors hover:border-border-strong cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
       >
         <Search className="size-3.5" />
         <span className="flex-1 text-left">Buscar…</span>
@@ -45,10 +47,20 @@ export function Topbar({
       <div className="ml-auto flex items-center gap-1.5">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon-sm" className="relative">
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="relative"
+              aria-label={
+                unread > 0 ? `Notificações (${unread} não lidas)` : "Notificações"
+              }
+            >
               <Bell className="size-4" />
               {unread > 0 && (
-                <span className="absolute -right-0.5 -top-0.5 flex size-4 items-center justify-center rounded-full bg-primary text-[9px] font-semibold text-white">
+                <span
+                  aria-hidden="true"
+                  className="absolute -right-0.5 -top-0.5 flex size-4 items-center justify-center rounded-full bg-primary text-[9px] font-semibold text-white"
+                >
                   {unread}
                 </span>
               )}
@@ -104,7 +116,13 @@ export function Topbar({
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button className="flex items-center gap-2 rounded-lg px-1.5 py-1 transition-colors hover:bg-surface-hover cursor-pointer">
+            {/* Abaixo de `sm` o nome fica oculto e sobra só o avatar, então o
+                rótulo precisa vir do aria-label. */}
+            <button
+              type="button"
+              aria-label={`Conta de ${user.name}`}
+              className="flex items-center gap-2 rounded-lg px-1.5 py-1 transition-colors hover:bg-surface-hover cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+            >
               <Avatar name={user.name} size="sm" />
               <span className="hidden text-[13px] font-medium sm:block">{user.name}</span>
             </button>

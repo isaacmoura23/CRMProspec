@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { CalendarPlus, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -50,8 +50,13 @@ export function TaskDialog({
   defaultOpen?: boolean;
 }) {
   const router = useRouter();
+  const pathname = usePathname();
   const { toast } = useToast();
-  const [open, setOpen] = React.useState(Boolean(defaultOpen));
+  // `defaultOpen` vem de `?nova=1`. Lido só na montagem, o atalho da paleta
+  // não abria o diálogo para quem já estava em /tarefas.
+  const openedByUrl = Boolean(defaultOpen);
+  const [localOpen, setLocalOpen] = React.useState(false);
+  const open = openedByUrl || localOpen;
   const [saving, setSaving] = React.useState(false);
   const [type, setType] = React.useState<string>("follow_up");
   const [title, setTitle] = React.useState("");
@@ -79,17 +84,25 @@ export function TaskDialog({
         return;
       }
       toast("Tarefa criada.");
-      setOpen(false);
+      closeDialog();
       setTitle("");
       setDescription("");
       router.refresh();
+    } catch {
+      toast("Não conseguimos criar a tarefa. Tente novamente.", "error");
     } finally {
       setSaving(false);
     }
   }
 
+  function closeDialog() {
+    setLocalOpen(false);
+    // Sem limpar o parâmetro, o diálogo reabriria no próximo render.
+    if (openedByUrl) router.replace(pathname, { scroll: false });
+  }
+
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={(v) => (v ? setLocalOpen(true) : closeDialog())}>
       <DialogTrigger asChild>
         {trigger ?? (
           <Button variant="secondary">
@@ -163,7 +176,7 @@ export function TaskDialog({
           </div>
         </div>
         <DialogFooter>
-          <Button variant="ghost" onClick={() => setOpen(false)}>
+          <Button variant="ghost" onClick={closeDialog}>
             Cancelar
           </Button>
           <Button onClick={submit} disabled={saving}>

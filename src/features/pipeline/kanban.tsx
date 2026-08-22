@@ -55,6 +55,7 @@ export function PipelineKanban({
   const { toast } = useToast();
   const [dragging, setDragging] = React.useState<string | null>(null);
   const [overStage, setOverStage] = React.useState<string | null>(null);
+  const [moving, setMoving] = React.useState(false);
   const [renaming, setRenaming] = React.useState<PipelineStage | null>(null);
   const [newName, setNewName] = React.useState("");
   const [adding, setAdding] = React.useState(false);
@@ -62,16 +63,28 @@ export function PipelineKanban({
 
   const ordered = [...stages].sort((a, b) => a.order - b.order);
 
-  async function onDrop(stageId: string) {
+  async function onDrop(e: React.DragEvent, stageId: string) {
+    // Os cards são <Link>, então o browser preenche o dataTransfer com a URL
+    // do lead. Sem cancelar o drop, a aba navega para essa URL no meio da
+    // troca de etapa.
+    e.preventDefault();
     setOverStage(null);
-    if (!dragging) return;
+    if (!dragging || moving) return;
     const lead = leads.find((l) => l.id === dragging);
     setDragging(null);
     if (!lead || lead.pipeline_stage_id === stageId) return;
-    await changeLeadStage(lead.id, stageId);
     const stage = stages.find((s) => s.id === stageId);
-    toast(`${lead.company_name} movido para ${stage?.name}.`);
-    router.refresh();
+    if (!stage) return;
+    setMoving(true);
+    try {
+      await changeLeadStage(lead.id, stageId);
+      toast(`${lead.company_name} movido para ${stage.name}.`);
+      router.refresh();
+    } catch {
+      toast(`Não conseguimos mover ${lead.company_name}. Tente novamente.`, "error");
+    } finally {
+      setMoving(false);
+    }
   }
 
   return (
@@ -91,10 +104,15 @@ export function PipelineKanban({
             )}
             onDragOver={(e) => {
               e.preventDefault();
+              e.dataTransfer.dropEffect = "move";
               setOverStage(stage.id);
             }}
-            onDragLeave={() => setOverStage((s) => (s === stage.id ? null : s))}
-            onDrop={() => onDrop(stage.id)}
+            onDragLeave={(e) => {
+              // Ignora o bubbling dos cards internos, que fazia o destaque piscar.
+              if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+              setOverStage((s) => (s === stage.id ? null : s));
+            }}
+            onDrop={(e) => onDrop(e, stage.id)}
           >
             <div className="flex items-center justify-between px-3 pb-1 pt-2.5">
               <div className="flex items-center gap-2">
@@ -107,7 +125,11 @@ export function PipelineKanban({
               </div>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <button className="rounded p-1 text-faint-foreground hover:bg-surface hover:text-foreground cursor-pointer">
+                  <button
+                    type="button"
+                    aria-label={`Opções da etapa ${stage.name}`}
+                    className="rounded p-1 text-faint-foreground hover:bg-surface hover:text-foreground cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                  >
                     <MoreHorizontal className="size-4" />
                   </button>
                 </DropdownMenuTrigger>
@@ -158,7 +180,10 @@ export function PipelineKanban({
                     key={lead.id}
                     href={`/leads/${lead.id}`}
                     draggable
-                    onDragStart={() => setDragging(lead.id)}
+                    onDragStart={(e) => {
+                      e.dataTransfer.effectAllowed = "move";
+                      setDragging(lead.id);
+                    }}
                     onDragEnd={() => setDragging(null)}
                     className={cn(
                       "block rounded-lg border border-border bg-surface p-3 shadow-card transition-all hover:border-border-strong hover:shadow-pop/50",
@@ -219,6 +244,7 @@ export function PipelineKanban({
               Cancelar
             </Button>
             <Button
+              disabled={newName.trim().length < 2}
               onClick={async () => {
                 if (renaming) await renameStage(renaming.id, newName);
                 setRenaming(null);

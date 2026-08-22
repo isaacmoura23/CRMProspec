@@ -1,5 +1,6 @@
 import "server-only";
 import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import { getDb } from "@/lib/store";
 import type { User } from "@/types";
 
@@ -19,18 +20,48 @@ export function isSupabaseConfigured(): boolean {
   );
 }
 
-export async function getCurrentUser(): Promise<User> {
-  const db = getDb();
+/** Usuário da sessão atual, ou `null` quando não há sessão válida. */
+export async function getSessionUser(): Promise<User | null> {
   const jar = await cookies();
   const userId = jar.get(SESSION_COOKIE)?.value;
-  const user = db.users.find((u) => u.id === userId);
-  // Modo demo: sem sessão explícita, opera como o owner da organização.
-  return user ?? db.users.find((u) => u.role === "owner") ?? db.users[0];
+  if (!userId) return null;
+  return getDb().users.find((u) => u.id === userId) ?? null;
+}
+
+/**
+ * Usuário da sessão, exigindo autenticação.
+ *
+ * Antes esta função caía no owner da organização quando não havia cookie,
+ * o que deixava toda a aplicação (e todas as server actions) acessíveis
+ * anonimamente com privilégio máximo.
+ */
+export async function getCurrentUser(): Promise<User> {
+  const user = await getSessionUser();
+  if (!user) redirect("/login");
+  return user;
+}
+
+/**
+ * Usuário da sessão, exigindo permissão administrativa.
+ *
+ * Devolve `null` para quem não é owner/admin, para a action decidir a
+ * mensagem de erro. Sem isso, um `viewer` conseguia convidar membros,
+ * promover a si mesmo e alterar as configurações da organização.
+ */
+export async function getAdminUser(): Promise<User | null> {
+  const user = await getCurrentUser();
+  return user.role === "owner" || user.role === "admin" ? user : null;
 }
 
 export async function setSessionUser(userId: string) {
   const jar = await cookies();
-  jar.set(SESSION_COOKIE, userId, { httpOnly: true, sameSite: "lax", path: "/" });
+  jar.set(SESSION_COOKIE, userId, {
+    httpOnly: true,
+    sameSite: "lax",
+    path: "/",
+    secure: process.env.NODE_ENV === "production",
+    maxAge: 60 * 60 * 24 * 30,
+  });
 }
 
 export async function clearSession() {

@@ -63,17 +63,40 @@ export function ProspectForm({ providerName }: { providerName: string }) {
   const [job, setJob] = React.useState<ProspectingJob | null>(null);
   const [starting, setStarting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [lostJob, setLostJob] = React.useState(false);
 
-  const running = job && (job.status === "queued" || job.status === "processing");
+  const running = job && !lostJob && (job.status === "queued" || job.status === "processing");
 
-  // polling do job em execução — progresso real, nunca simulado
+  // polling do job em execução — progresso real, nunca simulado.
+  // Se o job sumir (a execução que o criou foi encerrada) ou o polling
+  // falhar repetidamente, a tela precisa sair do estado "processando"
+  // em vez de girar para sempre.
   React.useEffect(() => {
     if (!job || !running) return;
+    const jobId = job.id;
+    let misses = 0;
+    let cancelled = false;
     const t = setInterval(async () => {
-      const fresh = await getProspectingJob(job.id);
-      if (fresh) setJob(fresh);
+      try {
+        const fresh = await getProspectingJob(jobId);
+        if (cancelled) return;
+        if (fresh) {
+          misses = 0;
+          setJob(fresh);
+          return;
+        }
+        misses += 1;
+      } catch {
+        misses += 1;
+      }
+      if (!cancelled && misses >= 8) {
+        setLostJob(true);
+      }
     }, 700);
-    return () => clearInterval(t);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
   }, [job?.id, running]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function submit() {
@@ -108,14 +131,35 @@ export function ProspectForm({ providerName }: { providerName: string }) {
         return;
       }
       const fresh = await getProspectingJob(res.jobId);
+      if (!fresh) {
+        setError(
+          "A busca foi iniciada, mas não conseguimos acompanhar o progresso. Confira a lista de leads em instantes."
+        );
+        return;
+      }
+      setLostJob(false);
       setJob(fresh);
+    } catch {
+      setError("Não conseguimos iniciar a busca agora. Tente novamente.");
     } finally {
       setStarting(false);
     }
   }
 
+  function resetSearch() {
+    setJob(null);
+    setLostJob(false);
+  }
+
   if (job) {
-    return <JobProgress job={job} onNewSearch={() => setJob(null)} onSeeLeads={() => router.push("/leads?ordenar=score")} />;
+    return (
+      <JobProgress
+        job={job}
+        lost={lostJob}
+        onNewSearch={resetSearch}
+        onSeeLeads={() => router.push("/leads?ordenar=score")}
+      />
+    );
   }
 
   return (
@@ -342,14 +386,19 @@ function StepRow({ step }: { step: JobStep }) {
 
 function JobProgress({
   job,
+  lost,
   onNewSearch,
   onSeeLeads,
 }: {
   job: ProspectingJob;
+  lost: boolean;
   onNewSearch: () => void;
   onSeeLeads: () => void;
 }) {
-  const finished = job.status === "completed" || job.status === "failed";
+  // `lost` cobre o caso em que o job deixou de responder: os botões de saída
+  // precisam aparecer mesmo sem um status terminal, senão a única saída é
+  // recarregar a página.
+  const finished = lost || job.status === "completed" || job.status === "failed";
 
   return (
     <div className="mx-auto max-w-2xl">
@@ -361,7 +410,9 @@ function JobProgress({
               ? "Busca concluída"
               : job.status === "failed"
                 ? "A busca encontrou um problema"
-                : `Prospectando ${job.params.niche} em ${job.params.city}…`}
+                : lost
+                  ? "Perdemos o acompanhamento desta busca"
+                  : `Prospectando ${job.params.niche} em ${job.params.city}…`}
           </CardTitle>
           <CardDescription>
             {job.params.quantity} empresas solicitadas · {job.params.city}, {job.params.country}
@@ -371,6 +422,13 @@ function JobProgress({
           {job.steps.map((s) => (
             <StepRow key={s.key} step={s} />
           ))}
+
+          {lost && job.status !== "completed" && job.status !== "failed" && (
+            <div className="rounded-lg border border-warning/30 bg-warning-soft px-4 py-3 text-[13px] text-warning">
+              A busca continua rodando no servidor, mas paramos de receber o progresso. Os
+              leads já encontrados estão salvos — confira a lista de leads.
+            </div>
+          )}
 
           {job.errors.length > 0 && (
             <div className="space-y-1 rounded-lg border border-warning/30 bg-warning-soft px-4 py-3">

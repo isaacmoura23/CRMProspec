@@ -1,4 +1,5 @@
 import type { CompanyProfile, Lead } from "@/types";
+import { list } from "@/ai/prompts/format";
 
 /**
  * Prompt de análise de oportunidade.
@@ -15,8 +16,8 @@ Sobre a empresa que você representa:
 - Nome: ${profile.company_name}
 - O que vende: ${profile.what_we_sell}
 - Para quem: ${profile.target_customers}
-- Serviços: ${profile.main_services.join("; ")}
-- Problemas que resolve: ${profile.problems_we_solve.join("; ")}
+- Serviços: ${list(profile.main_services)}
+- Problemas que resolve: ${list(profile.problems_we_solve)}
 
 Sua tarefa: analisar um potencial cliente e identificar UM problema comercial CONCRETO que a empresa representada consiga resolver.
 

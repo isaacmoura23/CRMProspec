@@ -163,7 +163,10 @@ export function setLeadStatus(leadId: string, status: LeadStatus, userId: string
   const lead = db.leads.find((l) => l.id === leadId);
   if (!lead || lead.status === status) return;
   lead.status = status;
-  lead.pipeline_stage_id = STATUS_TO_STAGE[status];
+  // Nem todo status tem etapa correspondente; manter a etapa atual evita que
+  // o lead fique com pipeline_stage_id undefined e suma do board.
+  const mappedStage = STATUS_TO_STAGE[status];
+  if (mappedStage) lead.pipeline_stage_id = mappedStage;
   lead.stage_entered_at = nowIso();
   lead.updated_at = nowIso();
   logActivity(leadId, "status_alterado", `Status alterado para ${STATUS_LABEL[status]}`, userId);

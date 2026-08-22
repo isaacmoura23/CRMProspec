@@ -265,21 +265,34 @@ export default async function DashboardPage({
             .slice(0, 6)
             .map((act) => {
               const lead = db.leads.find((l) => l.id === act.lead_id);
-              return (
-                <Link
-                  key={act.id}
-                  href={`/leads/${act.lead_id}`}
-                  className="flex items-center gap-3 border-b border-border py-2.5 last:border-0 hover:bg-surface-hover/50 -mx-2 px-2 rounded-md"
-                >
+              const body = (
+                <>
                   <span className="size-1.5 shrink-0 rounded-full bg-border-strong" />
                   <span className="min-w-0 flex-1 truncate text-[13px]">
-                    <span className="font-medium">{lead?.company_name ?? "Lead"}</span>
+                    <span className="font-medium">{lead?.company_name ?? "Sistema"}</span>
                     <span className="text-muted-foreground"> — {act.description}</span>
                   </span>
                   <span className="shrink-0 text-xs text-faint-foreground">
                     {timeAgo(act.created_at)}
                   </span>
+                </>
+              );
+              const rowClass =
+                "flex items-center gap-3 border-b border-border py-2.5 last:border-0 -mx-2 px-2 rounded-md";
+              // Atividades de sistema não têm lead: linkar levava a /leads/null,
+              // que cai em notFound().
+              return lead ? (
+                <Link
+                  key={act.id}
+                  href={`/leads/${lead.id}`}
+                  className={`${rowClass} hover:bg-surface-hover/50`}
+                >
+                  {body}
                 </Link>
+              ) : (
+                <div key={act.id} className={rowClass}>
+                  {body}
+                </div>
               );
             })}
         </CardContent>

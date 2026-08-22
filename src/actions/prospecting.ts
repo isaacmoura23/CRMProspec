@@ -1,7 +1,7 @@
 "use server";
 
 import { z } from "zod";
-import { getDb } from "@/lib/store";
+import { getDb, nowIso, saveDb } from "@/lib/store";
 import { getCurrentUser } from "@/lib/auth";
 import { createProspectingJob } from "@/jobs/prospecting";
 import type { ProspectingJob } from "@/types";
@@ -43,14 +43,40 @@ export async function startProspecting(
   return { jobId: job.id };
 }
 
+/**
+ * Um job só existe na memória do processo que o iniciou. Se essa execução
+ * for interrompida (limite de duração da função, cold start, deploy), nada
+ * marca o job como encerrado e a tela ficaria girando para sempre.
+ */
+const JOB_STALE_MS = 6 * 60 * 1000;
+
+function expireIfStale(job: ProspectingJob): ProspectingJob {
+  if (job.status !== "processing" && job.status !== "queued") return job;
+  const startedAt = Date.parse(job.created_at);
+  if (!Number.isFinite(startedAt) || Date.now() - startedAt < JOB_STALE_MS) return job;
+
+  job.status = "failed";
+  job.finished_at = nowIso();
+  job.errors.push(
+    "A busca foi interrompida antes de terminar. Os leads já encontrados foram salvos — tente novamente para completar."
+  );
+  for (const s of job.steps) if (s.status === "processing") s.status = "failed";
+  saveDb();
+  return job;
+}
+
 export async function getProspectingJob(jobId: string): Promise<ProspectingJob | null> {
+  await getCurrentUser();
   const db = getDb();
-  return db.prospecting_jobs.find((j) => j.id === jobId) ?? null;
+  const job = db.prospecting_jobs.find((j) => j.id === jobId);
+  return job ? expireIfStale(job) : null;
 }
 
 export async function getRecentJobs(): Promise<ProspectingJob[]> {
+  await getCurrentUser();
   const db = getDb();
   return [...db.prospecting_jobs]
     .sort((a, b) => b.created_at.localeCompare(a.created_at))
-    .slice(0, 5);
+    .slice(0, 5)
+    .map(expireIfStale);
 }

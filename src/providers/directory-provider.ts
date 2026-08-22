@@ -1,6 +1,6 @@
 import type { RawLead, SearchParams } from "@/types";
 import type { LeadProvider } from "@/providers/types";
-import { customNiche, FIRST_NAMES, nicheByKey, NICHES, OPENING_HOURS, STREET_NAMES } from "@/providers/directory-data";
+import { customNiche, FIRST_NAMES, nicheByKey, OPENING_HOURS, STREET_NAMES } from "@/providers/directory-data";
 
 /**
  * Provider de diretório empresarial (modo demonstração).

@@ -40,7 +40,14 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   return (
     <ToastContext.Provider value={{ toast }}>
       {children}
-      <div className="pointer-events-none fixed bottom-4 right-4 z-[100] flex flex-col gap-2">
+      {/* Praticamente todo feedback do app é toast: sem a região live, quem
+          usa leitor de tela não recebe confirmação de ação nenhuma. */}
+      <div
+        role="status"
+        aria-live="polite"
+        aria-atomic="false"
+        className="pointer-events-none fixed bottom-4 right-4 z-[100] flex flex-col gap-2"
+      >
         {items.map((t) => (
           <div
             key={t.id}
@@ -51,8 +58,10 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
             {icons[t.kind]}
             <span className="max-w-xs">{t.message}</span>
             <button
+              type="button"
+              aria-label="Fechar aviso"
               onClick={() => setItems((prev) => prev.filter((i) => i.id !== t.id))}
-              className="ml-1 rounded p-0.5 text-faint-foreground hover:text-foreground cursor-pointer"
+              className="ml-1 rounded p-0.5 text-faint-foreground hover:text-foreground cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
             >
               <X className="size-3.5" />
             </button>

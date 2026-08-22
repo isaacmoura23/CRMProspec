@@ -85,9 +85,26 @@ export async function toggleTask(taskId: string): Promise<void> {
 }
 
 export async function deleteTask(taskId: string): Promise<void> {
+  await getCurrentUser();
   const db = getDb();
+  const task = db.tasks.find((t) => t.id === taskId);
+  if (!task) return;
   db.tasks = db.tasks.filter((t) => t.id !== taskId);
+
+  // O agendamento vive em dois lugares: a tarefa e o `next_follow_up_at` do
+  // lead. Apagar só a tarefa deixava o lead marcado com um follow-up que já
+  // não existe, e ele nunca mais aparecia como "sem follow-up".
+  if (task.type === "follow_up" && task.lead_id) {
+    const lead = db.leads.find((l) => l.id === task.lead_id);
+    const remaining = db.tasks
+      .filter((t) => t.lead_id === task.lead_id && t.type === "follow_up" && !t.completed)
+      .map((t) => t.due_date)
+      .sort();
+    if (lead) lead.next_follow_up_at = remaining[0] ?? null;
+  }
+
   saveDb();
   revalidatePath("/tarefas");
   revalidatePath("/follow-ups");
+  if (task.lead_id) revalidatePath(`/leads/${task.lead_id}`);
 }

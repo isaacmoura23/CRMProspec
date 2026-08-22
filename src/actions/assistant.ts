@@ -1,6 +1,7 @@
 "use server";
 
 import { getDb } from "@/lib/store";
+import { getCurrentUser } from "@/lib/auth";
 import { daysSince } from "@/lib/format";
 import { statusRank } from "@/services/stats";
 
@@ -24,12 +25,56 @@ export interface AssistantReply {
   leads?: AssistantLead[];
 }
 
-function extractNumber(q: string, fallback: number): number {
-  const m = q.match(/(\d+)/);
+/**
+ * Extrai o limiar de uma comparação ("acima de 80", "score 80+").
+ *
+ * Pegar simplesmente o primeiro número da frase fazia "top 10 leads com
+ * score acima de 80" virar limiar 10 — ou seja, a base inteira.
+ */
+function extractThreshold(q: string, fallback: number): number {
+  const cmp = q.match(
+    /(?:acima de|acima|maior (?:que|do que)|mais de|superior a|a partir de|≥|>=|>)\s*(\d+)/
+  );
+  if (cmp) return parseInt(cmp[1]!, 10);
+  const plus = q.match(/(\d+)\s*\+/);
+  if (plus) return parseInt(plus[1]!, 10);
+  // Remove quantificadores de listagem antes de cair no primeiro número.
+  const cleaned = q.replace(/\b(?:top|primeiros?|melhores?|[úu]ltimos?)\s*\d+/g, " ");
+  const m = cleaned.match(/(\d+)/);
   return m ? parseInt(m[1]!, 10) : fallback;
 }
 
+/** Dias mencionados na pergunta ("há mais de 5 dias"). */
+function extractDays(q: string, fallback: number): number {
+  const m = q.match(/(\d+)\s*dias?/);
+  return m ? parseInt(m[1]!, 10) : extractThreshold(q, fallback);
+}
+
+/** Palavras que não identificam nicho algum. */
+const SEGMENT_STOPWORDS = new Set([
+  "nao",
+  "não",
+  "informado",
+  "outro",
+  "outros",
+  "geral",
+  "diversos",
+]);
+
+/**
+ * Tokens que realmente identificam o segmento de um lead. Sem isso,
+ * `segment: "Não informado"` (default do import CSV) fazia qualquer
+ * pergunta contendo "não" restringir a busca aos leads sem nicho.
+ */
+function segmentTokens(segment: string): string[] {
+  return segment
+    .toLowerCase()
+    .split(/[\s/,-]+/)
+    .filter((t) => t.length >= 4 && !SEGMENT_STOPWORDS.has(t));
+}
+
 export async function askAssistant(question: string): Promise<AssistantReply> {
+  await getCurrentUser();
   const db = getDb();
   const q = question.toLowerCase();
   const active = db.leads.filter((l) => !l.archived);
@@ -61,8 +106,10 @@ export async function askAssistant(question: string): Promise<AssistantReply> {
 
   /* Score acima de N (com nicho opcional) */
   if (/score/.test(q)) {
-    const min = extractNumber(q, 80);
-    const nicheMatch = active.filter((l) => q.includes(l.segment.toLowerCase().split(" ")[0]!));
+    const min = extractThreshold(q, 80);
+    const nicheMatch = active.filter((l) =>
+      segmentTokens(l.segment).some((t) => q.includes(t))
+    );
     const pool = nicheMatch.length > 0 ? nicheMatch : active;
     const result = pool
       .filter((l) => (l.lead_score ?? 0) >= min && l.status !== "fechado" && l.status !== "perdido")
@@ -112,7 +159,7 @@ export async function askAssistant(question: string): Promise<AssistantReply> {
 
   /* Sem follow-up há mais de X dias */
   if (/follow.?up|sem contato|parado|esfriando|abandonado/.test(q)) {
-    const days = extractNumber(q, 5);
+    const days = extractDays(q, 5);
     const result = active
       .filter(
         (l) =>

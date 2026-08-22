@@ -403,12 +403,7 @@ export interface RawLead {
   social_link?: string;
 }
 
-export type JobStepKey =
-  | "finding"
-  | "enriching"
-  | "social"
-  | "analyzing"
-  | "scoring";
+export type JobStepKey = "finding" | "enriching" | "scoring" | "analyzing";
 
 export interface JobStep {
   key: JobStepKey;

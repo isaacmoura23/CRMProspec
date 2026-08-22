@@ -18,13 +18,25 @@ import type { JobStep, Lead, ProspectingJob, SearchParams } from "@/types";
  * porcentagens falsas). Erros em um lead não interrompem a busca.
  */
 
+/**
+ * Passos exibidos na tela de prospecção.
+ *
+ * Cada um corresponde a uma medição distinta. Antes havia cinco: "presença
+ * digital" era um alias literal de "enriquecimento" (mesmo contador) e
+ * "score" era alias de "análise" — duas barras animavam sem medir nada.
+ */
 function makeSteps(total: number): JobStep[] {
   return [
     { key: "finding", label: "Encontrando empresas", done: 0, total, status: "processing" },
-    { key: "enriching", label: "Enriquecendo informações", done: 0, total: 0, status: "queued" },
-    { key: "social", label: "Procurando presença digital", done: 0, total: 0, status: "queued" },
-    { key: "analyzing", label: "Analisando oportunidades", done: 0, total: 0, status: "queued" },
+    {
+      key: "enriching",
+      label: "Enriquecendo dados e presença digital",
+      done: 0,
+      total: 0,
+      status: "queued",
+    },
     { key: "scoring", label: "Calculando score", done: 0, total: 0, status: "queued" },
+    { key: "analyzing", label: "Analisando oportunidades", done: 0, total: 0, status: "queued" },
   ];
 }
 
@@ -92,10 +104,12 @@ async function runProspectingJob(jobId: string, userId: string): Promise<void> {
     const provider = getActiveProvider();
     const filters = job.params.filters;
     const overfetch = hasActiveFilters(filters) ? 3 : 1.5;
-    const fetchTarget =
-      provider.id === "google_places"
-        ? Math.min(60, Math.max(job.params.quantity + 5, Math.ceil(job.params.quantity * overfetch)))
-        : job.params.quantity;
+    // O excedente vale para qualquer fonte: sem ele o provider de diretório
+    // entrega exatamente `quantity` e o que cair em dedupe/filtro vira falta.
+    const fetchTarget = Math.min(
+      provider.id === "google_places" ? 60 : 120,
+      Math.max(job.params.quantity + 5, Math.ceil(job.params.quantity * overfetch))
+    );
 
     // nunca repetir empresas de buscas anteriores, mesmo que os leads tenham sido removidos
     db.seen_source_ids ??= [];
@@ -104,8 +118,6 @@ async function runProspectingJob(jobId: string, userId: string): Promise<void> {
       quantity: fetchTarget,
       excludeSourceIds: db.seen_source_ids,
     });
-    const newIds = raws.map((r) => r.source_id).filter((id): id is string => Boolean(id));
-    db.seen_source_ids = [...db.seen_source_ids, ...newIds].slice(-10_000);
 
     const finding = step("finding");
     finding.done = raws.length;
@@ -113,27 +125,29 @@ async function runProspectingJob(jobId: string, userId: string): Promise<void> {
     finding.status = "completed";
 
     /* 2. Deduplicação contra a base existente */
+    const consumedIds: string[] = [];
     const candidates = raws.filter((raw) => {
       if (findDuplicate(raw, db.leads)) {
         job.duplicates += 1;
+        // Duplicado já está na base: não precisa voltar em buscas futuras.
+        if (raw.source_id) consumedIds.push(raw.source_id);
         return false;
       }
       return true;
     });
 
     const enriching = step("enriching");
-    const social = step("social");
-    enriching.total = social.total = candidates.length;
-    enriching.status = social.status = candidates.length > 0 ? "processing" : "completed";
+    enriching.total = candidates.length;
+    enriching.status = candidates.length > 0 ? "processing" : "completed";
     saveDb();
 
     /* 3. Enriquecimento real: visita o site e extrai Instagram, e-mail,
        WhatsApp, qualidade do site e sinais de marketing */
     const enriched = await enrichBatch(candidates, (done) => {
-      enriching.done = social.done = done;
+      enriching.done = done;
       saveDb();
     });
-    enriching.status = social.status = "completed";
+    enriching.status = "completed";
 
     /* 4. Filtros escolhidos pelo usuário — aplicados após o
        enriquecimento, quando os dados realmente existem */
@@ -147,21 +161,34 @@ async function runProspectingJob(jobId: string, userId: string): Promise<void> {
     analyzing.status = scoring.status = selected.length > 0 ? "processing" : "completed";
     saveDb();
 
-    /* 5. Criação + análise de IA + score — erro em um lead não derruba a busca */
+    /* 5. Criação + score + análise de IA — erro em um lead não derruba a busca */
     for (const raw of selected) {
+      let created: Lead | null = null;
       try {
-        const lead = createLeadFromRaw(raw, job.campaign_id, null);
-        job.found_lead_ids.push(lead.id);
-        await analyzeAndStore(lead, userId);
+        // createLeadFromRaw já calcula o score; a análise vem depois.
+        created = createLeadFromRaw(raw, job.campaign_id, null);
+        job.found_lead_ids.push(created.id);
+        if (raw.source_id) consumedIds.push(raw.source_id);
+        scoring.done += 1;
+        saveDb();
+        await analyzeAndStore(created, userId);
       } catch (err) {
+        const reason = err instanceof Error ? err.message : "erro desconhecido";
         job.errors.push(
-          `Não conseguimos processar "${raw.company_name}": ${err instanceof Error ? err.message : "erro desconhecido"}`
+          created
+            ? `"${raw.company_name}" foi importada, mas a análise falhou: ${reason}`
+            : `Não conseguimos processar "${raw.company_name}": ${reason}`
         );
       }
       analyzing.done += 1;
-      scoring.done += 1;
       saveDb();
     }
+
+    // Só marca como visto o que foi realmente consumido: empresas descartadas
+    // por filtro precisam continuar disponíveis para uma busca com outro perfil.
+    // A lista é relida agora (e não antes do await) para não sobrescrever o que
+    // outro job registrou nesse meio-tempo.
+    db.seen_source_ids = [...(db.seen_source_ids ?? []), ...consumedIds].slice(-10_000);
 
     analyzing.status = scoring.status = "completed";
     job.status = "completed";

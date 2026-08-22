@@ -1,6 +1,7 @@
 "use server";
 
 import { getDb } from "@/lib/store";
+import { getCurrentUser } from "@/lib/auth";
 
 export interface SearchResult {
   id: string;
@@ -13,6 +14,7 @@ export interface SearchResult {
 
 /** Busca global: empresa, contato, telefone, e-mail, Instagram, cidade */
 export async function globalSearch(query: string): Promise<SearchResult[]> {
+  await getCurrentUser();
   const q = query.trim().toLowerCase();
   if (q.length < 2) return [];
   const db = getDb();

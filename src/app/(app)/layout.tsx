@@ -10,7 +10,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const db = getDb();
   const user = await getCurrentUser();
   const notifications = [...db.notifications]
-    .filter((n) => n.user_id === user.id || n.user_id === "usr_zack")
+    .filter((n) => n.user_id === user.id)
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
 
   return (

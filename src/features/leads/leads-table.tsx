@@ -123,11 +123,16 @@ export function LeadsTable({
     router.replace(`${pathname}?${next.toString()}`, { scroll: false });
   }
 
-  async function run(fn: () => Promise<unknown>, message: string) {
+  /**
+   * `message` pode ser uma função do resultado para que ações parciais
+   * reportem o que de fato aconteceu — o toast fixo de "análise concluída"
+   * aparecia mesmo quando todas as análises falhavam.
+   */
+  async function run<T>(fn: () => Promise<T>, message: string | ((result: T) => string)) {
     setPending(true);
     try {
-      await fn();
-      toast(message);
+      const result = await fn();
+      toast(typeof message === "function" ? message(result) : message);
       setSelected(new Set());
       router.refresh();
     } catch {
@@ -138,15 +143,19 @@ export function LeadsTable({
   }
 
   async function handleExport() {
-    const csv = await exportLeadsCsv(ids.length ? ids : leads.map((l) => l.id));
-    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `leads-${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-    toast("CSV exportado.");
+    try {
+      const csv = await exportLeadsCsv(ids.length ? ids : leads.map((l) => l.id));
+      const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `leads-${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast("CSV exportado.");
+    } catch {
+      toast("Não conseguimos exportar agora. Tente novamente.", "error");
+    }
   }
 
   const show = (key: ColKey) => !hidden.has(key);
@@ -172,7 +181,13 @@ export function LeadsTable({
               <DropdownMenuContent align="end" className="w-60">
                 <DropdownMenuItem
                   onClick={() =>
-                    run(() => bulkAnalyze(ids), `Análise concluída para ${Math.min(ids.length, 25)} leads.`)
+                    run(
+                      () => bulkAnalyze(ids),
+                      ({ analyzed }) =>
+                        analyzed === 0
+                          ? "Nenhum lead pôde ser analisado. Tente novamente."
+                          : `Análise concluída para ${analyzed} de ${Math.min(ids.length, 25)} leads.`
+                    )
                   }
                 >
                   <Sparkles /> Analisar com IA
@@ -265,6 +280,7 @@ export function LeadsTable({
             <TableRow className="hover:bg-transparent">
               <TableHead className="w-10">
                 <Checkbox
+                  aria-label="Selecionar todos os leads"
                   checked={allSelected ? true : selected.size > 0 ? "indeterminate" : false}
                   onCheckedChange={toggleAll}
                 />
@@ -304,11 +320,27 @@ export function LeadsTable({
                 <TableRow
                   key={lead.id}
                   data-state={selected.has(lead.id) ? "selected" : undefined}
-                  className="cursor-pointer"
+                  // A linha inteira abre o lead; sem tabIndex/onKeyDown isso só
+                  // existia para quem usa mouse.
+                  tabIndex={0}
+                  role="link"
+                  aria-label={`Abrir ${lead.company_name}`}
+                  className="cursor-pointer focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary"
                   onClick={() => router.push(`/leads/${lead.id}`)}
+                  onKeyDown={(e) => {
+                    if (e.target !== e.currentTarget) return;
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      router.push(`/leads/${lead.id}`);
+                    }
+                  }}
                 >
                   <TableCell onClick={(e) => e.stopPropagation()}>
-                    <Checkbox checked={selected.has(lead.id)} onCheckedChange={() => toggle(lead.id)} />
+                    <Checkbox
+                      aria-label={`Selecionar ${lead.company_name}`}
+                      checked={selected.has(lead.id)}
+                      onCheckedChange={() => toggle(lead.id)}
+                    />
                   </TableCell>
                   <TableCell>
                     <span className="block max-w-52 truncate text-[13px] font-medium">{lead.company_name}</span>
@@ -331,11 +363,18 @@ export function LeadsTable({
                     <TableCell onClick={(e) => e.stopPropagation()}>
                       <span className="flex items-center gap-1.5">
                         {lead.website ? (
-                          <a href={lead.website} target="_blank" rel="noreferrer" title={lead.website} className="text-muted-foreground hover:text-primary">
+                          <a
+                            href={lead.website}
+                            target="_blank"
+                            rel="noreferrer"
+                            title={lead.website}
+                            aria-label={`Site: ${lead.website}`}
+                            className="text-muted-foreground hover:text-primary"
+                          >
                             <Globe className="size-3.5" />
                           </a>
                         ) : (
-                          <span title="Sem site" className="text-border-strong">
+                          <span title="Sem site" aria-label="Sem site" className="text-border-strong">
                             <Globe className="size-3.5" />
                           </span>
                         )}
@@ -345,21 +384,28 @@ export function LeadsTable({
                             target="_blank"
                             rel="noreferrer"
                             title={lead.instagram ?? ""}
+                            aria-label={`Instagram: ${lead.instagram}`}
                             className="text-muted-foreground hover:text-primary"
                           >
                             <AtSign className="size-3.5" />
                           </a>
                         ) : (
-                          <span className="text-border-strong">
+                          // A ausência do canal era comunicada só pela cor do
+                          // ícone — invisível para leitor de tela e daltônicos.
+                          <span title="Sem Instagram" aria-label="Sem Instagram" className="text-border-strong">
                             <AtSign className="size-3.5" />
                           </span>
                         )}
                         {lead.phone || lead.whatsapp ? (
-                          <span title={lead.whatsapp ?? lead.phone ?? ""} className="text-muted-foreground">
+                          <span
+                            title={lead.whatsapp ?? lead.phone ?? ""}
+                            aria-label={`Telefone: ${lead.whatsapp ?? lead.phone}`}
+                            className="text-muted-foreground"
+                          >
                             <Phone className="size-3.5" />
                           </span>
                         ) : (
-                          <span className="text-border-strong">
+                          <span title="Sem telefone" aria-label="Sem telefone" className="text-border-strong">
                             <Phone className="size-3.5" />
                           </span>
                         )}

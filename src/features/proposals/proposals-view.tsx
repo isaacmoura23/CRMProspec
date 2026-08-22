@@ -67,9 +67,9 @@ export function ProposalsView({
       const res = await createProposal({
         lead_id: leadId,
         service,
-        value: parseFloat(value.replace(",", ".")) || 0,
-        discount: parseFloat(discount) || 0,
-        valid_days: parseInt(validDays, 10) || 15,
+        value: Math.max(0, parseFloat(value.replace(",", ".")) || 0),
+        discount: Math.min(100, Math.max(0, parseFloat(discount) || 0)),
+        valid_days: Math.min(365, Math.max(1, parseInt(validDays, 10) || 15)),
         notes: notes || undefined,
       });
       if (res.error) {
@@ -122,15 +122,15 @@ export function ProposalsView({
               </div>
               <div className="space-y-1.5">
                 <Label>Valor ({currency})</Label>
-                <Input type="number" value={value} onChange={(e) => setValue(e.target.value)} placeholder="3500" />
+                <Input type="number" min={0} step="0.01" value={value} onChange={(e) => setValue(e.target.value)} placeholder="3500" />
               </div>
               <div className="space-y-1.5">
                 <Label>Desconto (%)</Label>
-                <Input type="number" value={discount} onChange={(e) => setDiscount(e.target.value)} />
+                <Input type="number" min={0} max={100} value={discount} onChange={(e) => setDiscount(e.target.value)} />
               </div>
               <div className="space-y-1.5">
                 <Label>Validade (dias)</Label>
-                <Input type="number" value={validDays} onChange={(e) => setValidDays(e.target.value)} />
+                <Input type="number" min={1} max={365} value={validDays} onChange={(e) => setValidDays(e.target.value)} />
               </div>
               <div className="space-y-1.5 sm:col-span-2">
                 <Label>Observações</Label>

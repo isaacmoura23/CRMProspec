@@ -17,7 +17,6 @@ import {
   Settings,
   Sparkles,
   Target,
-  Users,
   UsersRound,
   Workflow,
 } from "lucide-react";

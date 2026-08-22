@@ -27,6 +27,45 @@ const manualLeadSchema = z.object({
 
 export type ManualLeadInput = z.infer<typeof manualLeadSchema>;
 
+export const leadStatusSchema = z.enum([
+  "novo",
+  "analisado",
+  "qualificado",
+  "pronto_contato",
+  "contatado",
+  "respondeu",
+  "interessado",
+  "demo",
+  "reuniao",
+  "proposta",
+  "negociacao",
+  "fechado",
+  "perdido",
+]) satisfies z.ZodType<LeadStatus>;
+
+/** Campos que a edição inline pode alterar — tudo fora daqui é descartado. */
+const nullableText = (max: number) => z.string().trim().max(max).nullable().optional();
+
+const leadFieldPatchSchema = z
+  .object({
+    company_name: z.string().trim().min(2).max(120).optional(),
+    contact_name: nullableText(120),
+    segment: z.string().trim().min(2).max(60).optional(),
+    phone: nullableText(30),
+    whatsapp: nullableText(30),
+    email: nullableText(160),
+    website: nullableText(200),
+    instagram: nullableText(80),
+    city: z.string().trim().max(80).optional(),
+    state: nullableText(60),
+    country: z.string().trim().max(60).optional(),
+    description: nullableText(1000),
+    potential_value: z.number().min(0).nullable().optional(),
+    assigned_to: z.string().trim().max(60).nullable().optional(),
+    next_follow_up_at: z.string().trim().max(40).nullable().optional(),
+  })
+  .strict();
+
 export async function createLeadManual(
   input: ManualLeadInput,
   options?: { force?: boolean }
@@ -98,17 +137,26 @@ export async function updateLeadField(
     >
   >
 ): Promise<void> {
+  await getCurrentUser();
   const db = getDb();
   const lead = db.leads.find((l) => l.id === leadId);
   if (!lead) return;
-  Object.assign(lead, patch, { updated_at: nowIso() });
+  // Copia apenas os campos editáveis: `Object.assign(lead, patch)` com um
+  // patch cru deixava sobrescrever id, organization_id, lead_score e status.
+  const parsed = leadFieldPatchSchema.safeParse(patch);
+  if (!parsed.success) return;
+  Object.assign(lead, parsed.data, { updated_at: nowIso() });
   saveDb();
   revalidatePath(`/leads/${leadId}`);
   revalidatePath("/leads");
+  // `next_follow_up_at` e `assigned_to` alimentam estas duas telas.
+  revalidatePath("/follow-ups");
+  revalidatePath("/tarefas");
 }
 
 export async function changeLeadStatus(leadId: string, status: LeadStatus): Promise<void> {
   const user = await getCurrentUser();
+  if (!leadStatusSchema.safeParse(status).success) return;
   setLeadStatus(leadId, status, user.id);
   revalidatePath(`/leads/${leadId}`);
   revalidatePath("/leads");
@@ -160,6 +208,7 @@ export async function addNote(leadId: string, content: string): Promise<void> {
 export async function bulkArchive(ids: string[]): Promise<void> {
   const db = getDb();
   const user = await getCurrentUser();
+  // Leads arquivados também somem do board.
   for (const id of ids) {
     const lead = db.leads.find((l) => l.id === id);
     if (lead) {
@@ -179,6 +228,7 @@ export async function bulkArchive(ids: string[]): Promise<void> {
   }
   saveDb();
   revalidatePath("/leads");
+  revalidatePath("/pipeline");
 }
 
 export async function bulkAssign(ids: string[], userId: string): Promise<void> {
@@ -199,13 +249,17 @@ export async function bulkAssign(ids: string[], userId: string): Promise<void> {
 
 export async function bulkStatus(ids: string[], status: LeadStatus): Promise<void> {
   const user = await getCurrentUser();
+  if (!leadStatusSchema.safeParse(status).success) return;
   for (const id of ids) setLeadStatus(id, status, user.id);
   revalidatePath("/leads");
   revalidatePath("/pipeline");
 }
 
 export async function bulkCampaign(ids: string[], campaignId: string): Promise<void> {
+  await getCurrentUser();
   const db = getDb();
+  // Sem esta checagem os leads apontavam para uma campanha inexistente.
+  if (!db.campaigns.some((c) => c.id === campaignId)) return;
   for (const id of ids) {
     const lead = db.leads.find((l) => l.id === id);
     if (lead) {
@@ -239,6 +293,7 @@ export async function bulkAnalyze(ids: string[]): Promise<{ analyzed: number }> 
 }
 
 export async function bulkRescore(ids: string[]): Promise<void> {
+  await getCurrentUser();
   for (const id of ids) recomputeLeadScore(id);
   revalidatePath("/leads");
 }
@@ -309,14 +364,21 @@ export async function importCsvRows(
 /* ---------------- Exportação ---------------- */
 
 export async function exportLeadsCsv(ids: string[]): Promise<string> {
+  await getCurrentUser();
   const db = getDb();
   const rows = db.leads.filter((l) => ids.includes(l.id));
   const header = [
     "empresa", "contato", "nicho", "telefone", "whatsapp", "email", "site",
     "instagram", "cidade", "estado", "pais", "score", "status", "origem", "criado_em",
   ];
-  const esc = (v: string | number | null) =>
-    v === null || v === undefined ? "" : `"${String(v).replace(/"/g, '""')}"`;
+  // Prefixo de apóstrofo neutraliza injeção de fórmula: um nome de empresa
+  // começando com =, +, - ou @ seria executado ao abrir o CSV no Excel.
+  const esc = (v: string | number | null) => {
+    if (v === null || v === undefined) return "";
+    const s = String(v);
+    const safe = /^[=+\-@\t\r]/.test(s) ? `'${s}` : s;
+    return `"${safe.replace(/"/g, '""')}"`;
+  };
   const lines = rows.map((l) =>
     [
       l.company_name, l.contact_name, l.segment, l.phone, l.whatsapp, l.email,

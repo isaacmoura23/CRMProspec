@@ -17,19 +17,30 @@ const TIME_FMT = new Intl.DateTimeFormat("pt-BR", {
   minute: "2-digit",
 });
 
+/**
+ * `Intl.DateTimeFormat.format` lança `RangeError` em data inválida — e uma
+ * data ruim vinda do JSON persistido ou de um import derrubava a página
+ * inteira. Aqui uma data inválida vira travessão, como um valor ausente.
+ */
+function parseDate(iso: string | null | undefined): Date | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
 export function formatDate(iso: string | null | undefined): string {
-  if (!iso) return "—";
-  return DATE_FMT.format(new Date(iso));
+  const d = parseDate(iso);
+  return d ? DATE_FMT.format(d) : "—";
 }
 
 export function formatDateTime(iso: string | null | undefined): string {
-  if (!iso) return "—";
-  return DATETIME_FMT.format(new Date(iso));
+  const d = parseDate(iso);
+  return d ? DATETIME_FMT.format(d) : "—";
 }
 
 export function formatTime(iso: string | null | undefined): string {
-  if (!iso) return "—";
-  return TIME_FMT.format(new Date(iso));
+  const d = parseDate(iso);
+  return d ? TIME_FMT.format(d) : "—";
 }
 
 export function formatCurrency(value: number, currency = "BRL"): string {
@@ -46,8 +57,9 @@ export function formatPercent(value: number, digits = 1): string {
 
 /** "há 2 dias", "há 3 horas", "agora" */
 export function timeAgo(iso: string | null | undefined): string {
-  if (!iso) return "—";
-  const diffMs = Date.now() - new Date(iso).getTime();
+  const parsed = parseDate(iso);
+  if (!parsed) return "—";
+  const diffMs = Date.now() - parsed.getTime();
   const minutes = Math.floor(diffMs / 60_000);
   if (minutes < 1) return "agora";
   if (minutes < 60) return `há ${minutes} min`;
@@ -64,7 +76,8 @@ export function timeAgo(iso: string | null | undefined): string {
 
 /** Dias até uma data futura (negativo se vencida) */
 export function daysUntil(iso: string): number {
-  const target = new Date(iso);
+  const target = parseDate(iso);
+  if (!target) return Infinity;
   target.setHours(0, 0, 0, 0);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -72,8 +85,9 @@ export function daysUntil(iso: string): number {
 }
 
 export function daysSince(iso: string | null | undefined): number {
-  if (!iso) return Infinity;
-  return Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
+  const parsed = parseDate(iso);
+  if (!parsed) return Infinity;
+  return Math.floor((Date.now() - parsed.getTime()) / 86_400_000);
 }
 
 export function greeting(): string {

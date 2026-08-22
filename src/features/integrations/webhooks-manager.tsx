@@ -38,6 +38,7 @@ export function WebhooksManager({ webhooks }: { webhooks: Webhook[] }) {
   const [open, setOpen] = React.useState(false);
   const [url, setUrl] = React.useState("");
   const [events, setEvents] = React.useState<Set<string>>(new Set(["lead.created"]));
+  const [saving, setSaving] = React.useState(false);
 
   return (
     <Card>
@@ -88,14 +89,24 @@ export function WebhooksManager({ webhooks }: { webhooks: Webhook[] }) {
             <DialogFooter>
               <Button variant="ghost" onClick={() => setOpen(false)}>Cancelar</Button>
               <Button
+                disabled={saving || !url.trim() || events.size === 0}
                 onClick={async () => {
-                  const res = await createWebhook(url, [...events]);
-                  if (res.error) toast(res.error, "error");
-                  else {
+                  setSaving(true);
+                  try {
+                    const res = await createWebhook(url, [...events]);
+                    if (res.error) {
+                      toast(res.error, "error");
+                      return;
+                    }
                     toast("Webhook criado.");
                     setOpen(false);
                     setUrl("");
+                    setEvents(new Set(["lead.created"]));
                     router.refresh();
+                  } catch {
+                    toast("Não conseguimos criar o webhook. Tente novamente.", "error");
+                  } finally {
+                    setSaving(false);
                   }
                 }}
               >
@@ -126,14 +137,19 @@ export function WebhooksManager({ webhooks }: { webhooks: Webhook[] }) {
                   )}
                 </span>
                 <button
+                  type="button"
+                  aria-label={`Excluir o webhook ${w.url}`}
                   onClick={async () => {
-                    if (confirm("Excluir este webhook?")) {
+                    if (!confirm("Excluir este webhook?")) return;
+                    try {
                       await deleteWebhook(w.id);
                       toast("Webhook excluído.");
                       router.refresh();
+                    } catch {
+                      toast("Não conseguimos excluir o webhook. Tente novamente.", "error");
                     }
                   }}
-                  className="rounded p-1 text-faint-foreground hover:bg-danger-soft hover:text-danger cursor-pointer"
+                  className="rounded p-1 text-faint-foreground hover:bg-danger-soft hover:text-danger cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
                 >
                   <Trash2 className="size-3.5" />
                 </button>

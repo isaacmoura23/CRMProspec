@@ -19,9 +19,6 @@ interface Params {
   dir?: string;
 }
 
-/** Fontes de prospecção — a lista exibe somente o que a busca do /prospectar filtrou e entregou */
-const PROSPECTING_SOURCES = new Set(["google_places", "diretorio"]);
-
 function applySort(leads: Lead[], p: Params): Lead[] {
   const dir = p.dir === "asc" ? 1 : -1;
   const key = p.ordenar ?? "score";
@@ -44,10 +41,11 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
   const params = await searchParams;
   const db = getDb();
 
-  const prospected = db.leads.filter(
-    (l) => !l.archived && PROSPECTING_SOURCES.has(l.source)
-  );
-  const sorted = applySort(prospected, params);
+  // Todas as origens entram na lista: prospecção, cadastro manual e import
+  // CSV. Filtrar por origem deixava a página permanentemente vazia mesmo
+  // depois de criar um lead pelos botões que ficam nela mesma.
+  const active = db.leads.filter((l) => !l.archived);
+  const sorted = applySort(active, params);
 
   const rows: LeadRow[] = sorted.map((lead) => {
     const analysis = db.lead_analysis.find((a) => a.lead_id === lead.id);
@@ -62,7 +60,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
     <div className="space-y-4">
       <PageHeader
         title="Leads"
-        description="As oportunidades encontradas pela sua prospecção, já filtradas, enriquecidas e pontuadas."
+        description="Suas oportunidades — prospectadas, importadas ou cadastradas — já enriquecidas e pontuadas."
       >
         <ImportCsvDialog />
         <NewLeadDialog />
@@ -76,8 +74,8 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
       {rows.length === 0 ? (
         <EmptyState
           icon={Target}
-          title="Nenhum lead prospectado ainda"
-          description="Use a prospecção para encontrar empresas que combinam exatamente com os filtros que você escolher."
+          title="Nenhum lead ainda"
+          description="Use a prospecção para encontrar empresas que combinam exatamente com os filtros que você escolher — ou cadastre e importe leads que você já tem."
         >
           <Button asChild>
             <Link href="/prospectar">

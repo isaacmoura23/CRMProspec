@@ -34,9 +34,13 @@ export function CommandPalette() {
   const router = useRouter();
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState("");
-  const [results, setResults] = React.useState<SearchResult[]>([]);
+  // Guardamos o termo junto dos resultados: "buscando" vira estado derivado
+  // (resultado ainda não corresponde ao termo digitado) em vez de flag própria.
+  const [results, setResults] = React.useState<{ term: string; items: SearchResult[] }>({
+    term: "",
+    items: [],
+  });
   const [active, setActive] = React.useState(0);
-  const [searching, setSearching] = React.useState(false);
 
   React.useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -56,60 +60,68 @@ export function CommandPalette() {
     };
   }, []);
 
-  React.useEffect(() => {
-    if (!open) {
-      setQuery("");
-      setResults([]);
-      setActive(0);
-    }
-  }, [open]);
+  const term = query.trim();
+  const canSearch = term.length >= 2;
 
   React.useEffect(() => {
-    if (query.trim().length < 2) {
-      setResults([]);
-      return;
-    }
-    setSearching(true);
+    if (term.length < 2) return;
+    let cancelled = false;
     const t = setTimeout(async () => {
-      try {
-        setResults(await globalSearch(query));
-        setActive(0);
-      } finally {
-        setSearching(false);
-      }
+      const items = await globalSearch(term);
+      if (cancelled) return;
+      setResults({ term, items });
+      setActive(0);
     }, 200);
-    return () => clearTimeout(t);
-  }, [query]);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [term]);
 
-  const filteredActions = query.trim()
-    ? QUICK_ACTIONS.filter((a) => a.label.toLowerCase().includes(query.toLowerCase()))
+  const searching = canSearch && results.term !== term;
+  // Resultados só valem enquanto houver termo buscável — evita que a lista
+  // anterior continue contando para a navegação por teclado.
+  const visibleResults = canSearch ? results.items : [];
+
+  const filteredActions = term
+    ? QUICK_ACTIONS.filter((a) => a.label.toLowerCase().includes(term.toLowerCase()))
     : QUICK_ACTIONS;
 
   const items: Array<{ label: string; href: string }> = [
-    ...results.map((r) => ({ label: r.company, href: `/leads/${r.id}` })),
+    ...visibleResults.map((r) => ({ label: r.company, href: `/leads/${r.id}` })),
     ...filteredActions.map((a) => ({ label: a.label, href: a.href })),
   ];
+  const activeIndex = Math.min(active, Math.max(items.length - 1, 0));
+
+  function handleOpenChange(next: boolean) {
+    setOpen(next);
+    if (!next) {
+      setQuery("");
+      setResults({ term: "", items: [] });
+      setActive(0);
+    }
+  }
 
   function go(href: string) {
-    setOpen(false);
+    handleOpenChange(false);
     router.push(href);
   }
 
   function onInputKey(e: React.KeyboardEvent) {
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      setActive((a) => Math.min(a + 1, items.length - 1));
+      setActive(Math.min(activeIndex + 1, items.length - 1));
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
-      setActive((a) => Math.max(a - 1, 0));
-    } else if (e.key === "Enter" && items[active]) {
+      setActive(Math.max(activeIndex - 1, 0));
+    } else if (e.key === "Enter" && items[activeIndex]) {
       e.preventDefault();
-      go(items[active].href);
+      go(items[activeIndex].href);
     }
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="top-[20%] max-w-xl translate-y-0 p-0 [&>button]:hidden">
         <DialogTitle className="sr-only">Busca global</DialogTitle>
         <div className="flex items-center gap-2.5 border-b border-border px-4">
@@ -127,27 +139,27 @@ export function CommandPalette() {
           </kbd>
         </div>
         <div className="max-h-80 overflow-y-auto p-2">
-          {query.trim().length >= 2 && (
+          {canSearch && (
             <div className="mb-1">
               <p className="px-2.5 py-1 text-[11px] font-medium uppercase tracking-wide text-faint-foreground">
                 Leads
               </p>
-              {searching && results.length === 0 && (
+              {searching && visibleResults.length === 0 && (
                 <p className="px-2.5 py-2 text-[13px] text-muted-foreground">Buscando…</p>
               )}
-              {!searching && results.length === 0 && (
+              {!searching && visibleResults.length === 0 && (
                 <p className="px-2.5 py-2 text-[13px] text-muted-foreground">
-                  Nenhum lead encontrado para “{query}”.
+                  Nenhum lead encontrado para “{term}”.
                 </p>
               )}
-              {results.map((r, i) => (
+              {visibleResults.map((r, i) => (
                 <button
                   key={r.id}
                   onClick={() => go(`/leads/${r.id}`)}
                   onMouseEnter={() => setActive(i)}
                   className={cn(
                     "flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left text-sm cursor-pointer",
-                    active === i && "bg-surface-hover"
+                    activeIndex === i && "bg-surface-hover"
                   )}
                 >
                   <ScoreBadge score={r.score} size="sm" />
@@ -158,7 +170,7 @@ export function CommandPalette() {
                       {r.match && ` · ${r.match}`}
                     </span>
                   </span>
-                  {active === i && <CornerDownLeft className="size-3.5 text-faint-foreground" />}
+                  {activeIndex === i && <CornerDownLeft className="size-3.5 text-faint-foreground" />}
                 </button>
               ))}
             </div>
@@ -167,7 +179,7 @@ export function CommandPalette() {
             Ações
           </p>
           {filteredActions.map((a, i) => {
-            const idx = results.length + i;
+            const idx = visibleResults.length + i;
             return (
               <button
                 key={a.href}
@@ -175,12 +187,12 @@ export function CommandPalette() {
                 onMouseEnter={() => setActive(idx)}
                 className={cn(
                   "flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left text-sm cursor-pointer",
-                  active === idx && "bg-surface-hover"
+                  activeIndex === idx && "bg-surface-hover"
                 )}
               >
                 <a.icon className="size-4 text-muted-foreground" />
                 <span className="flex-1">{a.label}</span>
-                {active === idx && <CornerDownLeft className="size-3.5 text-faint-foreground" />}
+                {activeIndex === idx && <CornerDownLeft className="size-3.5 text-faint-foreground" />}
               </button>
             );
           })}

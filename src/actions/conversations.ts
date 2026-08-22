@@ -39,6 +39,11 @@ export async function sendMessage(conversationId: string, content: string): Prom
   }
   saveDb();
   revalidatePath("/conversas");
+  // A mensagem atualiza `last_contact_at` e a timeline do lead.
+  if (lead) {
+    revalidatePath("/leads");
+    revalidatePath(`/leads/${lead.id}`);
+  }
 }
 
 /**
@@ -47,6 +52,7 @@ export async function sendMessage(conversationId: string, content: string): Prom
  * webhook do WhatsApp Business executará quando conectado.
  */
 export async function simulateInbound(conversationId: string, content: string): Promise<void> {
+  const actor = await getCurrentUser();
   if (!content.trim()) return;
   const db = getDb();
   const conv = db.conversations.find((c) => c.id === conversationId);
@@ -83,7 +89,8 @@ export async function simulateInbound(conversationId: string, content: string): 
     db.notifications.unshift({
       id: uid("ntf"),
       organization_id: db.organization.id,
-      user_id: lead.assigned_to ?? db.users[0]!.id,
+      // Sem responsável definido, quem está operando recebe o aviso.
+      user_id: lead.assigned_to ?? actor.id,
       title: `${lead.company_name} respondeu`,
       body: content.trim().slice(0, 100),
       link: `/conversas`,
@@ -94,9 +101,12 @@ export async function simulateInbound(conversationId: string, content: string): 
   saveDb();
   revalidatePath("/conversas");
   revalidatePath("/leads");
+  // A notificação criada aparece no sino da topbar, montada no layout.
+  revalidatePath("/", "layout");
 }
 
 export async function markConversationRead(conversationId: string): Promise<void> {
+  await getCurrentUser();
   const db = getDb();
   const conv = db.conversations.find((c) => c.id === conversationId);
   if (conv?.unread) {

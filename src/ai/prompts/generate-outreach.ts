@@ -1,4 +1,5 @@
 import type { CompanyProfile, Lead, LeadAnalysis, MessageFormat, MessageTone } from "@/types";
+import { list } from "@/ai/prompts/format";
 
 export const FORMAT_LABEL: Record<MessageFormat, string> = {
   curta: "Mensagem curta",
@@ -41,7 +42,7 @@ export function buildOutreachPrompt(
 Contexto da empresa:
 - O que vende: ${profile.what_we_sell}
 - Estilo de comunicação: ${profile.communication_style}
-- NUNCA dizer/fazer: ${profile.never_say.join("; ")}
+- NUNCA dizer/fazer: ${list(profile.never_say)}
 
 REGRAS DA PRIMEIRA ABORDAGEM:
 1. Estrutura: cumprimento → contextualização natural (ex.: "dei uma olhada no perfil de vocês") → problema específico percebido → impacto resumido → curiosidade → pergunta de abertura ("Posso te mostrar?", "Quer que eu te explique rapidinho?").

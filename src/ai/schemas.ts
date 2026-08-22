@@ -17,6 +17,29 @@ export const outreachSchema = z.object({
   message: z.string().min(30),
 });
 
+/**
+ * Enums de entrada da geração de abordagem. Server actions são endpoints
+ * públicos: sem isto, um `format` fora do enum atravessa o switch do
+ * engine e grava `content: undefined` no banco.
+ */
+export const messageFormatSchema = z.enum([
+  "curta",
+  "consultiva",
+  "whatsapp",
+  "instagram_dm",
+  "email",
+  "audio",
+  "follow_up",
+]);
+
+export const messageToneSchema = z.enum([
+  "padrao",
+  "mais_curto",
+  "mais_direto",
+  "mais_informal",
+  "mais_profissional",
+]);
+
 export const classificationSchema = z.object({
   classification: z.enum([
     "interessado",

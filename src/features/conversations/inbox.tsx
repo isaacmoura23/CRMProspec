@@ -14,7 +14,7 @@ import { markConversationRead, sendMessage, simulateInbound } from "@/actions/co
 import { suggestObjectionResponse } from "@/actions/ai";
 import { CLASSIFICATION_LABEL } from "@/ai/schemas";
 import { STATUS_LABEL } from "@/services/stats";
-import { formatDateTime, timeAgo } from "@/lib/format";
+import { formatCurrency, formatDateTime, timeAgo } from "@/lib/format";
 import type { Conversation, Lead, Message, PipelineStage, User } from "@/types";
 import { cn } from "@/lib/utils";
 
@@ -26,7 +26,7 @@ export interface InboxData {
   stages: PipelineStage[];
 }
 
-export function Inbox({ data }: { data: InboxData }) {
+export function Inbox({ data, currency }: { data: InboxData; currency: string }) {
   const router = useRouter();
   const { toast } = useToast();
   const sorted = [...data.conversations].sort((a, b) =>
@@ -228,7 +228,7 @@ export function Inbox({ data }: { data: InboxData }) {
               <InfoRow label="Cidade" value={`${lead.city}, ${lead.country}`} />
               <InfoRow
                 label="Valor potencial"
-                value={lead.potential_value ? `R$ ${lead.potential_value.toLocaleString("pt-BR")}` : "—"}
+                value={lead.potential_value ? formatCurrency(lead.potential_value, currency) : "—"}
               />
             </div>
             <Button variant="secondary" size="sm" className="w-full" asChild>

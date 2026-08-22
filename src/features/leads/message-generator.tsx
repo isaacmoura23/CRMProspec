@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useRouter } from "next/navigation";
 import { Check, Copy, Loader2, Mic, RefreshCw, Save, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -38,34 +39,47 @@ export function MessageGenerator({
   hasAnalysis: boolean;
   savedGenerations: AIGeneration[];
 }) {
+  const router = useRouter();
   const { toast } = useToast();
   const [format, setFormat] = React.useState<MessageFormat>("whatsapp");
   const [tone, setTone] = React.useState<MessageTone>("padrao");
-  const [variant, setVariant] = React.useState(0);
   const [current, setCurrent] = React.useState<AIGeneration | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [copied, setCopied] = React.useState(false);
 
+  // Identifica a geração mais recente: trocar de formato rápido fazia a
+  // resposta lenta da requisição anterior sobrescrever a atual.
+  const requestId = React.useRef(0);
+  const variantRef = React.useRef(0);
+
   async function generate(nextFormat?: MessageFormat, nextTone?: MessageTone, bumpVariant = false) {
     const f = nextFormat ?? format;
     const t = nextTone ?? tone;
-    const v = bumpVariant ? variant + 1 : variant;
-    if (bumpVariant) setVariant(v);
+    // O ref não sofre com o closure obsoleto de dois cliques seguidos, que
+    // pediam a mesma variante duas vezes.
+    const v = bumpVariant ? variantRef.current + 1 : variantRef.current;
+    if (bumpVariant) variantRef.current = v;
+    const id = ++requestId.current;
     setLoading(true);
     try {
       const res = await generateOutreach(leadId, f, t, v);
+      if (id !== requestId.current) return;
       if ("error" in res) {
         toast(res.error, "error");
         return;
       }
       setCurrent(res.generation);
+    } catch {
+      if (id === requestId.current) {
+        toast("Não conseguimos gerar a mensagem agora. Tente novamente.", "error");
+      }
     } finally {
-      setLoading(false);
+      if (id === requestId.current) setLoading(false);
     }
   }
 
   async function copy() {
-    if (!current) return;
+    if (!current?.content) return;
     await navigator.clipboard.writeText(current.content);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
@@ -74,9 +88,16 @@ export function MessageGenerator({
 
   async function save() {
     if (!current) return;
-    await saveGeneration(current.id);
-    setCurrent({ ...current, saved: true });
-    toast("Mensagem salva no histórico do lead.");
+    try {
+      await saveGeneration(current.id);
+      setCurrent({ ...current, saved: true });
+      toast("Mensagem salva no histórico do lead.");
+      // Sem o refresh a lista "Mensagens salvas" (renderizada no servidor)
+      // só incluía a mensagem depois de um reload manual.
+      router.refresh();
+    } catch {
+      toast("Não conseguimos salvar a mensagem. Tente novamente.", "error");
+    }
   }
 
   return (
@@ -96,13 +117,16 @@ export function MessageGenerator({
             {FORMATS.map((f) => (
               <button
                 key={f}
+                type="button"
+                aria-pressed={format === f}
+                disabled={loading}
                 onClick={() => {
                   setFormat(f);
                   setTone("padrao");
                   generate(f, "padrao");
                 }}
                 className={cn(
-                  "flex h-8 items-center gap-1.5 rounded-lg border px-3 text-[13px] font-medium transition-colors cursor-pointer",
+                  "flex h-8 items-center gap-1.5 rounded-lg border px-3 text-[13px] font-medium transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary",
                   format === f
                     ? "border-primary bg-primary-soft text-primary-soft-fg"
                     : "border-border bg-surface text-muted-foreground hover:border-border-strong"

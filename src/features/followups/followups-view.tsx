@@ -3,7 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Check, ChevronDown, Copy, Loader2, MessageSquareQuote, Sparkles } from "lucide-react";
+import { ChevronDown, Copy, Loader2, MessageSquareQuote, Sparkles } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -36,7 +36,7 @@ function groupOf(t: Task): string {
   if (due < tomorrow) return "hoje";
   if (due < dayAfter) return "amanha";
   if (due < week) return "semana";
-  return "semana";
+  return "depois";
 }
 
 const GROUPS: Array<[string, string]> = [
@@ -44,6 +44,7 @@ const GROUPS: Array<[string, string]> = [
   ["hoje", "Hoje"],
   ["amanha", "Amanhã"],
   ["semana", "Próximos 7 dias"],
+  ["depois", "Mais adiante"],
   ["concluido", "Concluídos"],
 ];
 

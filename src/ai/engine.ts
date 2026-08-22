@@ -286,9 +286,14 @@ export function engineOutreach(
   );
   const ask = pick(["Posso te mostrar?", "Quer que eu te explique rapidinho?", "Faz sentido eu te mostrar como seria?"], variant);
 
+  // Formato desconhecido cai na versão curta: o switch é exaustivo para o
+  // enum, mas em runtime um valor inesperado devolveria `undefined` e o
+  // texto vazio acabaria persistido como conteúdo da mensagem.
+  const short = `${opener} ${context.replace(/\.$/, ":")} ${problem}. ${curiosity} ${ask}`;
+
   switch (format) {
     case "curta":
-      return `${opener} ${context.replace(/\.$/, ":")} ${problem}. ${curiosity} ${ask}`;
+      return short;
 
     case "consultiva":
       return `${opener}\n\n${context} ${problem.charAt(0).toUpperCase() + problem.slice(1)}.\n\n${analysis.problem_impact}\n\n${curiosity} ${ask}`;
@@ -342,6 +347,9 @@ export function engineOutreach(
         variant
       )}`;
     }
+
+    default:
+      return short;
   }
 }
 

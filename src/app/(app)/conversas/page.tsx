@@ -38,6 +38,7 @@ export default function ConversasPage() {
             users: db.users,
             stages: db.pipeline_stages,
           }}
+          currency={db.organization.currency}
         />
       )}
     </div>

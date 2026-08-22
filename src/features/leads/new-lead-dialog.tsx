@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { AlertCircle, Loader2, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -36,9 +36,15 @@ const EMPTY: ManualLeadInput = {
 
 export function NewLeadDialog() {
   const router = useRouter();
+  const pathname = usePathname();
   const params = useSearchParams();
   const { toast } = useToast();
-  const [open, setOpen] = React.useState(params.get("novo") === "1");
+  // `?novo=1` é lido a cada render, não só na montagem: quem já estava em
+  // /leads e usava "Novo lead" da paleta navegava sem que o diálogo abrisse,
+  // porque o componente não remonta.
+  const openedByUrl = params.get("novo") === "1";
+  const [localOpen, setLocalOpen] = React.useState(false);
+  const open = openedByUrl || localOpen;
   const [form, setForm] = React.useState<ManualLeadInput>(EMPTY);
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -46,6 +52,15 @@ export function NewLeadDialog() {
 
   function set<K extends keyof ManualLeadInput>(key: K, value: string) {
     setForm((f) => ({ ...f, [key]: value }));
+  }
+
+  function handleOpenChange(next: boolean) {
+    setLocalOpen(next);
+    if (next) return;
+    setDuplicate(null);
+    setError(null);
+    // Sem limpar o parâmetro, o diálogo reabriria no próximo render.
+    if (openedByUrl) router.replace(pathname, { scroll: false });
   }
 
   async function submit(force = false) {
@@ -62,17 +77,19 @@ export function NewLeadDialog() {
         return;
       }
       toast("Lead criado com sucesso.");
-      setOpen(false);
+      setLocalOpen(false);
       setForm(EMPTY);
       setDuplicate(null);
       router.push(`/leads/${res.id}`);
+    } catch {
+      setError("Não conseguimos criar o lead agora. Tente novamente.");
     } finally {
       setSaving(false);
     }
   }
 
   return (
-    <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) { setDuplicate(null); setError(null); } }}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
         <Button variant="secondary">
           <Plus /> Novo lead
@@ -101,7 +118,7 @@ export function NewLeadDialog() {
               <Button
                 variant="secondary"
                 onClick={() => {
-                  setOpen(false);
+                  setLocalOpen(false);
                   router.push(`/leads/${duplicate.id}`);
                 }}
               >
@@ -172,7 +189,7 @@ export function NewLeadDialog() {
             )}
 
             <DialogFooter>
-              <Button variant="ghost" onClick={() => setOpen(false)}>
+              <Button variant="ghost" onClick={() => handleOpenChange(false)}>
                 Cancelar
               </Button>
               <Button onClick={() => submit(false)} disabled={saving}>

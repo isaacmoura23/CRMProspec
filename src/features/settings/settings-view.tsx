@@ -67,26 +67,35 @@ export function SettingsView({
   const [defaultNiche, setDefaultNiche] = React.useState(settings.default_niche);
   const [defaultCountry, setDefaultCountry] = React.useState(settings.default_country);
 
-  /* IA — Sobre minha empresa */
+  /* IA — Sobre minha empresa. Os `?? []` cobrem perfis gravados antes da
+     validação do servidor, que podiam vir sem alguma das listas. */
+  const joinList = (v: string[] | undefined | null, sep = "\n") => (v ?? []).join(sep);
   const [p, setP] = React.useState({
-    company_name: profile.company_name,
-    what_we_sell: profile.what_we_sell,
-    target_customers: profile.target_customers,
-    main_services: profile.main_services.join("\n"),
-    average_ticket: profile.average_ticket,
-    differentiators: profile.differentiators.join("\n"),
-    problems_we_solve: profile.problems_we_solve.join("\n"),
-    priority_niches: profile.priority_niches.join(", "),
-    communication_style: profile.communication_style,
-    never_say: profile.never_say.join("\n"),
+    company_name: profile.company_name ?? "",
+    what_we_sell: profile.what_we_sell ?? "",
+    target_customers: profile.target_customers ?? "",
+    main_services: joinList(profile.main_services),
+    average_ticket: profile.average_ticket ?? "",
+    differentiators: joinList(profile.differentiators),
+    problems_we_solve: joinList(profile.problems_we_solve),
+    priority_niches: joinList(profile.priority_niches, ", "),
+    communication_style: profile.communication_style ?? "",
+    never_say: joinList(profile.never_say),
   });
 
-  async function run(key: string, fn: () => Promise<unknown>) {
+  async function run(key: string, fn: () => Promise<{ error?: string } | unknown>) {
     setSaving(key);
     try {
-      await fn();
+      const res = await fn();
+      const error = res && typeof res === "object" && "error" in res ? res.error : undefined;
+      if (typeof error === "string") {
+        toast(error, "error");
+        return;
+      }
       toast("Configurações salvas.");
       router.refresh();
+    } catch {
+      toast("Não conseguimos salvar agora. Tente novamente.", "error");
     } finally {
       setSaving(null);
     }
@@ -213,7 +222,9 @@ export function SettingsView({
               onClick={() =>
                 run("prospeccao", () =>
                   updateSettings({
-                    min_score: parseInt(minScore, 10) || 60,
+                    // O servidor recusa fora de 0–100; limitamos aqui para o
+                    // usuário não perder o resto do formulário por um dígito.
+                    min_score: Math.min(100, Math.max(0, parseInt(minScore, 10) || 60)),
                     default_niche: defaultNiche,
                     default_country: defaultCountry,
                   })

@@ -11,7 +11,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/components/ui/toast";
 import { deleteTask, toggleTask } from "@/actions/tasks";
-import { formatTime } from "@/lib/format";
+import { formatDate, formatTime } from "@/lib/format";
 import type { Task, User } from "@/types";
 import { cn } from "@/lib/utils";
 
@@ -64,6 +64,8 @@ export function TaskItem({ task, users }: { task: TaskWithLead; users: User[] })
   const { toast } = useToast();
   const responsible = users.find((u) => u.id === task.assigned_to);
   const overdue = !task.completed && new Date(task.due_date) < new Date();
+  const [toggling, setToggling] = React.useState(false);
+  const [deleting, setDeleting] = React.useState(false);
 
   return (
     <div
@@ -74,9 +76,20 @@ export function TaskItem({ task, users }: { task: TaskWithLead; users: User[] })
     >
       <Checkbox
         checked={task.completed}
+        // `disabled` durante o round-trip evita que um duplo clique alterne
+        // a tarefa duas vezes e a deixe no estado original.
+        disabled={toggling}
+        aria-label={`Marcar "${task.title}" como ${task.completed ? "pendente" : "concluída"}`}
         onCheckedChange={async () => {
-          await toggleTask(task.id);
-          router.refresh();
+          setToggling(true);
+          try {
+            await toggleTask(task.id);
+            router.refresh();
+          } catch {
+            toast("Não conseguimos atualizar a tarefa. Tente novamente.", "error");
+          } finally {
+            setToggling(false);
+          }
         }}
         className="mt-0.5"
       />
@@ -90,7 +103,7 @@ export function TaskItem({ task, users }: { task: TaskWithLead; users: User[] })
         </div>
         <p className="mt-0.5 text-xs text-muted-foreground">
           <span className={cn(overdue && "font-medium text-danger")}>
-            {new Date(task.due_date).toLocaleDateString("pt-BR")} às {formatTime(task.due_date)}
+            {formatDate(task.due_date)} às {formatTime(task.due_date)}
           </span>
           {responsible && ` · ${responsible.name.split(" ")[0]}`}
           {task.lead_name && task.lead_id && (
@@ -107,14 +120,23 @@ export function TaskItem({ task, users }: { task: TaskWithLead; users: User[] })
         )}
       </div>
       <button
+        type="button"
+        aria-label={`Excluir tarefa ${task.title}`}
+        disabled={deleting}
         onClick={async () => {
-          if (confirm("Excluir esta tarefa?")) {
+          if (!confirm("Excluir esta tarefa?")) return;
+          setDeleting(true);
+          try {
             await deleteTask(task.id);
             toast("Tarefa excluída.");
             router.refresh();
+          } catch {
+            toast("Não conseguimos excluir a tarefa. Tente novamente.", "error");
+          } finally {
+            setDeleting(false);
           }
         }}
-        className="rounded p-1 text-faint-foreground hover:bg-danger-soft hover:text-danger cursor-pointer"
+        className="rounded p-1 text-faint-foreground hover:bg-danger-soft hover:text-danger cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
       >
         <Trash2 className="size-3.5" />
       </button>
@@ -191,6 +213,7 @@ export function TasksView({ tasks, users }: { tasks: TaskWithLead[]; users: User
                 <Button
                   variant="ghost"
                   size="icon-sm"
+                  aria-label="Mês anterior"
                   onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))}
                 >
                   <ChevronLeft />
@@ -198,6 +221,7 @@ export function TasksView({ tasks, users }: { tasks: TaskWithLead[]; users: User
                 <Button
                   variant="ghost"
                   size="icon-sm"
+                  aria-label="Próximo mês"
                   onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))}
                 >
                   <ChevronRight />
