@@ -2,6 +2,7 @@ import "server-only";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { getDb } from "@/lib/store";
+import { ensureLeadsLoaded } from "@/services/lead-repository";
 import type { User } from "@/types";
 
 /**
@@ -25,6 +26,10 @@ export async function getSessionUser(): Promise<User | null> {
   const jar = await cookies();
   const userId = jar.get(SESSION_COOKIE)?.value;
   if (!userId) return null;
+  // Ponto de entrada comum a todas as páginas autenticadas e a praticamente
+  // toda server action: é onde os leads do Supabase entram no snapshot antes
+  // de qualquer leitura.
+  await ensureLeadsLoaded();
   return getDb().users.find((u) => u.id === userId) ?? null;
 }
 

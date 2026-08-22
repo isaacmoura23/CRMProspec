@@ -172,6 +172,22 @@ export function saveDb() {
   } catch (err) {
     console.error("[store] falha ao persistir banco local:", err);
   }
+  // Com Supabase configurado, os leads também vão para o banco. É agendado
+  // para depois da resposta: é rede, e não pode atrasar a ação do usuário.
+  notifyLeadsChanged();
+}
+
+/**
+ * Gancho de sincronização, injetado pelo repositório de leads.
+ *
+ * A inversão evita que o store (usado por todo o domínio) passe a importar a
+ * camada do Supabase, o que fecharia um ciclo — o repositório é quem importa
+ * o store.
+ */
+let notifyLeadsChanged: () => void = () => {};
+
+export function setLeadsChangeListener(listener: () => void) {
+  notifyLeadsChanged = listener;
 }
 
 export function resetDb(): Database {
