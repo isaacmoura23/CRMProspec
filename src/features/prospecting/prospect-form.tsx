@@ -10,6 +10,7 @@ import {
   Circle,
   Compass,
   Loader2,
+  MapPin,
   Search,
   XCircle,
 } from "lucide-react";
@@ -46,7 +47,14 @@ const CHARACTERISTICS: Array<{ key: string; label: string }> = [
   { key: "strongSocial", label: "Presença forte em redes sociais" },
 ];
 
-export function ProspectForm({ providerName }: { providerName: string }) {
+export function ProspectForm({
+  providerName,
+  providerId,
+}: {
+  providerName: string;
+  providerId: string;
+}) {
+  const isLive = providerId === "google_places";
   const router = useRouter();
   const [niche, setNiche] = React.useState("imobiliaria");
   const [customNiche, setCustomNiche] = React.useState("");
@@ -339,12 +347,27 @@ export function ProspectForm({ providerName }: { providerName: string }) {
         </Card>
         <Card>
           <CardContent className="p-4 text-[13px] text-muted-foreground">
-            <span className="font-medium text-foreground">Fonte ativa:</span> {providerName}.
-            Configure o Google Places em{" "}
-            <Link href="/integracoes" className="text-primary hover:underline">
-              Integrações
-            </Link>{" "}
-            para buscar empresas reais do Google Maps.
+            {/* Deixa explícito de onde vêm as empresas: o texto anterior
+                mandava configurar o Google mesmo quando já estava ligado. */}
+            {isLive ? (
+              <>
+                <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
+                  <MapPin className="size-3.5 text-primary" /> Conectado ao Google Maps
+                </span>
+                <br />
+                As empresas vêm do Google Places — dados reais, com telefone, site e avaliações
+                do perfil de cada negócio.
+              </>
+            ) : (
+              <>
+                <span className="font-medium text-foreground">Fonte ativa:</span> {providerName}{" "}
+                (demonstração). Conecte o Google Places em{" "}
+                <Link href="/integracoes" className="text-primary hover:underline">
+                  Integrações
+                </Link>{" "}
+                para buscar empresas reais do Google Maps.
+              </>
+            )}
           </CardContent>
         </Card>
       </div>

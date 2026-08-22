@@ -17,7 +17,7 @@ export default function ProspectarPage() {
         title="Prospectar"
         description="Configure a busca e deixe o sistema encontrar, enriquecer, analisar e pontuar as oportunidades."
       />
-      <ProspectForm providerName={provider.name} />
+      <ProspectForm providerName={provider.name} providerId={provider.id} />
     </div>
   );
 }

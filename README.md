@@ -90,6 +90,33 @@ navegação.
 - **Resposta pausa cadência:** lead respondeu → follow-ups automáticos pausam. É
   uma automação editável, não uma regra fixa no código.
 
+## Conectar ao Google Maps (empresas reais)
+
+Sem chave, a prospecção usa um diretório de demonstração — empresas geradas,
+coerentes com o nicho e a cidade, mas fictícias. Com a chave, a busca passa a
+vir do Google Maps, com telefone, site e avaliações reais de cada negócio.
+
+1. Em [console.cloud.google.com](https://console.cloud.google.com), crie ou
+   escolha um projeto.
+2. Ative a **Places API (New)** na biblioteca de APIs.
+3. Vincule uma conta de faturamento ao projeto — a API exige, e há cota
+   gratuita mensal.
+4. Em **Credenciais → Criar credenciais → Chave de API**, gere a chave.
+5. Defina `GOOGLE_PLACES_API_KEY` no `.env.local` e reinicie (`npm run dev`).
+   Em produção, a mesma variável vai em **Vercel → Settings → Environment
+   Variables**, seguida de um novo deploy.
+
+Confira em **Integrações**: o card do Google Places tem um botão *Testar
+conexão* que faz uma chamada real e mostra o que voltou. Ele distingue chave
+inválida, API não habilitada, faturamento ausente e cota esgotada — cada uma
+pede uma ação diferente. Quando a conexão está ativa, a tela de Prospectar
+passa a indicar "Conectado ao Google Maps".
+
+Limites que valem saber: o Text Search devolve no máximo 60 resultados por
+busca (então um pedido de 100 entrega até 60), e o nicho é validado contra os
+tipos do Google — um termo muito fora do vocabulário do Google Maps pode não
+casar com nada, e a busca diz isso em vez de terminar vazia sem explicação.
+
 ## Produção com Supabase
 
 1. Crie um projeto no Supabase e rode `database/migrations/0001_initial.sql` no SQL Editor (schema completo com RLS por organização).

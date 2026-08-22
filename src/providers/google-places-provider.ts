@@ -59,6 +59,40 @@ interface GooglePlace {
 const SOCIAL_HOSTS = /(instagram\.com|facebook\.com|linktr\.ee|wa\.me|api\.whatsapp\.com|bio\.link|beacons\.ai|taplink)/i;
 const AGGREGATOR_HOSTS = /(linktr\.ee|bio\.link|beacons\.ai|taplink)/i;
 
+/**
+ * Traduz a recusa do Google para algo acionável.
+ *
+ * O status sozinho ("respondeu 403") não diz se a chave é inválida, se a
+ * Places API não foi habilitada no projeto ou se falta faturamento — que
+ * são as três causas comuns e exigem ações diferentes.
+ */
+async function describeApiError(res: Response): Promise<string> {
+  let detail = "";
+  try {
+    const body = (await res.json()) as { error?: { message?: string; status?: string } };
+    detail = body.error?.message ?? "";
+  } catch {
+    // resposta sem JSON — fica só o status
+  }
+  const lower = detail.toLowerCase();
+  if (res.status === 400 && lower.includes("api key not valid")) {
+    return "A chave do Google Places é inválida. Confira o valor de GOOGLE_PLACES_API_KEY.";
+  }
+  if (res.status === 403 && lower.includes("has not been used")) {
+    return "A Places API (New) não está habilitada neste projeto do Google Cloud. Habilite-a e tente de novo.";
+  }
+  if (res.status === 403 && (lower.includes("billing") || lower.includes("faturamento"))) {
+    return "O projeto do Google Cloud precisa de uma conta de faturamento ativa para usar a Places API.";
+  }
+  if (res.status === 403) {
+    return `O Google recusou a chamada (403). Verifique as restrições da chave — de aplicativo e de API. ${detail}`.trim();
+  }
+  if (res.status === 429) {
+    return "Cota da Places API esgotada por agora. Tente novamente mais tarde ou aumente o limite no Google Cloud.";
+  }
+  return `Google Places respondeu ${res.status}. ${detail}`.trim();
+}
+
 /** Fisher–Yates — cada busca amostra empresas diferentes do resultado */
 function shuffle<T>(arr: T[]): T[] {
   const out = [...arr];
@@ -96,6 +130,11 @@ export class GooglePlacesProvider implements LeadProvider {
     const regionCode = REGION_CODES[params.country.trim().toLowerCase()];
     const wanted = Math.min(params.quantity, MAX_RESULTS);
     const excluded = new Set(params.excludeSourceIds ?? []);
+    // O place_id é estável, mas um mesmo negócio pode ter fichas duplicadas
+    // no Google; excluir por nome evita reentregar o que já está na base.
+    const excludedNames = new Set(
+      (params.excludeNames ?? []).map((n) => n.trim().toLowerCase())
+    );
 
     const places: GooglePlace[] = [];
     const seenIds = new Set<string>();
@@ -137,20 +176,32 @@ export class GooglePlacesProvider implements LeadProvider {
 
       if (!res.ok) {
         // se a primeira página falhar, é erro real; páginas seguintes: usa o que já veio
-        if (places.length === 0) throw new Error(`Google Places respondeu ${res.status}`);
+        if (places.length === 0) throw new Error(await describeApiError(res));
         break;
       }
 
       const data = (await res.json()) as { places?: GooglePlace[]; nextPageToken?: string };
       for (const p of data.places ?? []) {
         if (seenIds.has(p.id) || excluded.has(p.id)) continue;
+        const name = p.displayName?.text?.trim().toLowerCase();
+        if (name && excludedNames.has(name)) continue;
         seenIds.add(p.id);
         places.push(p);
       }
       pageToken = data.nextPageToken;
     } while (pageToken && places.length < wanted);
 
-    return shuffle(places.filter((p) => matchesNiche(p, params.niche)))
+    const matching = places.filter((p) => matchesNiche(p, params.niche));
+    if (matching.length === 0 && places.length > 0) {
+      // O Google devolveu resultados, mas nenhum do tipo esperado para o
+      // nicho. Sem esta mensagem o job terminaria com zero leads e nenhuma
+      // explicação de por quê.
+      throw new Error(
+        `O Google encontrou ${places.length} lugares para "${query}", mas nenhum classificado como ${nicheLabel}. Tente um nicho mais próximo do vocabulário do Google Maps.`
+      );
+    }
+
+    return shuffle(matching)
       .slice(0, wanted)
       .map((p): RawLead => {
         const uri = p.websiteUri;

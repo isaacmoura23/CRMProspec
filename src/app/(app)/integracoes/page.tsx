@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { WebhooksManager } from "@/features/integrations/webhooks-manager";
+import { GooglePlacesCard } from "@/features/integrations/google-places-card";
 import { isSupabaseConfigured } from "@/lib/auth";
 import { timeAgo } from "@/lib/format";
 
@@ -40,7 +41,13 @@ export default function IntegracoesPage() {
       />
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {db.integrations.map((integration) => {
+        {/* O Google Places tem card próprio porque a conexão é verificável
+            com uma chamada real, em vez de inferida da variável de ambiente. */}
+        <GooglePlacesCard hasKey={Boolean(process.env.GOOGLE_PLACES_API_KEY)} />
+
+        {db.integrations
+          .filter((i) => i.provider !== "Google Places")
+          .map((integration) => {
           const meta = META[integration.provider];
           const status = statusOf(integration.provider);
           const Icon = meta?.icon ?? Bot;
