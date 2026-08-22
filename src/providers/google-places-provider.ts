@@ -14,6 +14,8 @@ import { extractInstagramHandle, extractWhatsapp } from "@/services/enrichment";
 
 const PAGE_SIZE = 20;
 const MAX_RESULTS = 60; // limite do Text Search com paginação
+/** Teto de variações de consulta por busca — cada uma é uma chamada cobrada. */
+const MAX_QUERY_VARIANTS = 4;
 
 /** Nicho da UI → tipos do Google Places aceitos (validação do resultado) */
 const NICHE_TYPES: Record<string, { includedType?: string; accept: string[] }> = {
@@ -30,6 +32,31 @@ const NICHE_TYPES: Record<string, { includedType?: string; accept: string[] }> =
   pousada: { includedType: "bed_and_breakfast", accept: ["bed_and_breakfast", "guest_house", "inn", "lodging", "hotel", "campground", "farmstay"] },
   loja_roupas: { includedType: "clothing_store", accept: ["clothing_store", "shoe_store", "store"] },
   restaurante: { includedType: "restaurant", accept: ["restaurant", "food", "cafe", "bar", "bakery", "meal_takeaway", "meal_delivery"] },
+};
+
+/**
+ * Formas alternativas de pedir o mesmo nicho ao Google.
+ *
+ * Com uma única consulta, o Text Search devolve sempre o mesmo recorte
+ * ordenado por relevância — a segunda prospecção no mesmo nicho e cidade
+ * traria as mesmas empresas. Alternar entre termos equivalentes faz o
+ * Google explorar cantos diferentes do índice, então cada busca traz
+ * empresas diferentes sem mudar o que está sendo procurado.
+ */
+const NICHE_QUERIES: Record<string, string[]> = {
+  imobiliaria: ["imobiliária", "corretora de imóveis", "imobiliária locação", "imobiliária venda de imóveis", "administradora de imóveis"],
+  corretor: ["corretor de imóveis", "consultor imobiliário", "corretora de imóveis autônoma"],
+  loja_veiculos: ["loja de veículos", "concessionária de seminovos", "revenda de carros", "multimarcas veículos"],
+  clinica: ["clínica médica", "consultório médico", "centro clínico", "clínica de especialidades"],
+  estetica: ["clínica de estética", "centro de estética", "estética avançada", "salão de beleza e estética"],
+  personal: ["personal trainer", "estúdio de treinamento funcional", "assessoria esportiva", "studio de personal"],
+  nutricionista: ["nutricionista", "consultório de nutrição", "clínica de nutrição"],
+  arquiteto: ["escritório de arquitetura", "arquiteto", "arquitetura e interiores", "design de interiores"],
+  advogado: ["escritório de advocacia", "advogado", "sociedade de advogados", "assessoria jurídica"],
+  hotel: ["hotel", "hotelaria", "hotel executivo", "apart hotel"],
+  pousada: ["pousada", "hospedagem", "pousada charmosa", "guest house"],
+  loja_roupas: ["loja de roupas", "boutique de moda", "loja de vestuário", "moda feminina loja"],
+  restaurante: ["restaurante", "bistrô", "casa de comida", "restaurante almoço"],
 };
 
 const REGION_CODES: Record<string, string> = {
@@ -126,7 +153,12 @@ export class GooglePlacesProvider implements LeadProvider {
 
     const nicheLabel = nicheByKey(params.niche)?.label ?? params.niche;
     const mapping = NICHE_TYPES[params.niche];
-    const query = `${nicheLabel} em ${params.city}${params.state ? `, ${params.state}` : ""}, ${params.country}`;
+    const local = `${params.city}${params.state ? `, ${params.state}` : ""}, ${params.country}`;
+    // Ordem embaralhada: a consulta de partida muda a cada prospecção, então
+    // duas buscas iguais não devolvem a mesma lista.
+    const queries = shuffle(NICHE_QUERIES[params.niche] ?? [nicheLabel]).map(
+      (term) => `${term} em ${local}`
+    );
     const regionCode = REGION_CODES[params.country.trim().toLowerCase()];
     const wanted = Math.min(params.quantity, MAX_RESULTS);
     const excluded = new Set(params.excludeSourceIds ?? []);
@@ -138,58 +170,68 @@ export class GooglePlacesProvider implements LeadProvider {
 
     const places: GooglePlace[] = [];
     const seenIds = new Set<string>();
-    let pageToken: string | undefined;
+    let firstCallFailed: string | null = null;
 
-    do {
-      const res = await fetch("https://places.googleapis.com/v1/places:searchText", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Goog-Api-Key": key,
-          "X-Goog-FieldMask": [
-            "places.id",
-            "places.displayName",
-            "places.formattedAddress",
-            "places.nationalPhoneNumber",
-            "places.internationalPhoneNumber",
-            "places.websiteUri",
-            "places.rating",
-            "places.userRatingCount",
-            "places.googleMapsUri",
-            "places.businessStatus",
-            "places.types",
-            "places.primaryType",
-            "places.regularOpeningHours.weekdayDescriptions",
-            "nextPageToken",
-          ].join(","),
-        },
-        body: JSON.stringify({
-          textQuery: query,
-          pageSize: PAGE_SIZE,
-          languageCode: "pt-BR",
-          ...(regionCode ? { regionCode } : {}),
-          ...(mapping?.includedType ? { includedType: mapping.includedType } : {}),
-          ...(pageToken ? { pageToken } : {}),
-        }),
-        signal: AbortSignal.timeout(30_000),
-      });
+    // Cada variação é uma chamada cobrada, então só avançamos para a próxima
+    // enquanto faltarem empresas para o pedido.
+    for (const currentQuery of queries.slice(0, MAX_QUERY_VARIANTS)) {
+      if (places.length >= wanted) break;
+      let pageToken: string | undefined;
 
-      if (!res.ok) {
-        // se a primeira página falhar, é erro real; páginas seguintes: usa o que já veio
-        if (places.length === 0) throw new Error(await describeApiError(res));
-        break;
-      }
+      do {
+        const res = await fetch("https://places.googleapis.com/v1/places:searchText", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Goog-Api-Key": key,
+            "X-Goog-FieldMask": [
+              "places.id",
+              "places.displayName",
+              "places.formattedAddress",
+              "places.nationalPhoneNumber",
+              "places.internationalPhoneNumber",
+              "places.websiteUri",
+              "places.rating",
+              "places.userRatingCount",
+              "places.googleMapsUri",
+              "places.businessStatus",
+              "places.types",
+              "places.primaryType",
+              "places.regularOpeningHours.weekdayDescriptions",
+              "nextPageToken",
+            ].join(","),
+          },
+          body: JSON.stringify({
+            textQuery: currentQuery,
+            pageSize: PAGE_SIZE,
+            languageCode: "pt-BR",
+            ...(regionCode ? { regionCode } : {}),
+            ...(mapping?.includedType ? { includedType: mapping.includedType } : {}),
+            ...(pageToken ? { pageToken } : {}),
+          }),
+          signal: AbortSignal.timeout(30_000),
+        });
 
-      const data = (await res.json()) as { places?: GooglePlace[]; nextPageToken?: string };
-      for (const p of data.places ?? []) {
-        if (seenIds.has(p.id) || excluded.has(p.id)) continue;
-        const name = p.displayName?.text?.trim().toLowerCase();
-        if (name && excludedNames.has(name)) continue;
-        seenIds.add(p.id);
-        places.push(p);
-      }
-      pageToken = data.nextPageToken;
-    } while (pageToken && places.length < wanted);
+        if (!res.ok) {
+          // Guarda o motivo da primeira falha: se nenhuma variação trouxer
+          // nada, é ele que explica o porquê ao usuário.
+          firstCallFailed ??= await describeApiError(res);
+          break;
+        }
+
+        const data = (await res.json()) as { places?: GooglePlace[]; nextPageToken?: string };
+        for (const p of data.places ?? []) {
+          if (seenIds.has(p.id) || excluded.has(p.id)) continue;
+          const name = p.displayName?.text?.trim().toLowerCase();
+          if (name && excludedNames.has(name)) continue;
+          seenIds.add(p.id);
+          places.push(p);
+        }
+        pageToken = data.nextPageToken;
+      } while (pageToken && places.length < wanted);
+    }
+
+    if (places.length === 0 && firstCallFailed) throw new Error(firstCallFailed);
 
     const matching = places.filter((p) => matchesNiche(p, params.niche));
     if (matching.length === 0 && places.length > 0) {
@@ -197,7 +239,7 @@ export class GooglePlacesProvider implements LeadProvider {
       // nicho. Sem esta mensagem o job terminaria com zero leads e nenhuma
       // explicação de por quê.
       throw new Error(
-        `O Google encontrou ${places.length} lugares para "${query}", mas nenhum classificado como ${nicheLabel}. Tente um nicho mais próximo do vocabulário do Google Maps.`
+        `O Google encontrou ${places.length} lugares em ${local}, mas nenhum classificado como ${nicheLabel}. Tente um nicho mais próximo do vocabulário do Google Maps.`
       );
     }
 
