@@ -123,6 +123,58 @@ casar com nada, e a busca diz isso em vez de terminar vazia sem explicação.
 2. Preencha `NEXT_PUBLIC_SUPABASE_URL` e `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
 3. O isolamento multi-tenant é garantido por Row Level Security (`member_organizations()`).
 
+## Carreira (currículo, vagas e candidaturas)
+
+Módulo em `/carreira`, separado do funil comercial: candidatos não são leads
+e nada do currículo vai para os webhooks do CRM.
+
+**Fluxo:** enviar PDF → extrair perfil → analisar currículo e links → aceitar
+correções (com PDF revisado opcional) → definir preferências → buscar vagas →
+revisar a campanha → executar candidaturas → acompanhar cada envio.
+
+**Como funciona por baixo**
+
+- PDF validado no servidor (assinatura, tamanho ≤ 10 MB, parser), com texto por
+  página e links tanto do texto quanto das anotações de hyperlink. PDF
+  digitalizado depende de OCR (`OCR_SPACE_API_KEY`); sem ele, a interface diz
+  que a leitura está indisponível.
+- Análise com pesos publicados (8 critérios) pelo motor determinístico
+  (`services/career/analysis-engine.ts`); com `OPENAI_API_KEY`, o modelo
+  acrescenta correções que só entram se citarem trecho literal do currículo e
+  não introduzirem números novos. Layout visual fica declarado como "não
+  avaliado" (exige renderização das páginas).
+- Links são visitados por um cliente HTTP com bloqueio de SSRF
+  (`lib/safe-url.ts` + `services/career/safe-fetch.ts`): DNS resolvido e
+  conferido, conexão no IP validado, redirecionamentos revalidados, limites de
+  bytes/tempo/concorrência. LinkedIn é reportado como bloqueado (exige login).
+- Vagas: `providers/jobs/` — Remotive (sem chave, vagas remotas), Adzuna
+  (`ADZUNA_*`), importação por URL (JSON-LD `JobPosting`) e fixtures apenas com
+  `CAREER_DEMO_JOBS=true`. Aderência explicável em `services/career/matching.ts`.
+- Envio: Resend (`RESEND_*`, remetente de domínio verificado, um e-mail por
+  candidatura com PDF anexo — a API Batch não aceita anexos) ou Gmail (OAuth
+  `gmail.send`, tokens cifrados com `CAREER_TOKEN_SECRET`). Anúncio sem e-mail
+  publicado vira "ação manual" com link, currículo e mensagem prontos.
+- Fila durável (`services/career/queue.ts`): jobs com lease, tentativas,
+  backoff com jitter e tratamento de 429; sobrevive a reinício. Acordada por
+  `after()` nas actions, pela própria página e por cron em
+  `/api/career/worker` (`vercel.json` + `CRON_SECRET`).
+- Webhook do Resend em `/api/webhooks/resend` com assinatura Svix verificada
+  sobre o corpo bruto, tolerância de replay e deduplicação por `svix-id`.
+- Persistência: snapshot local em demo; com Supabase, tabelas `career_*` e
+  bucket privado `career-resumes` (`database/migrations/0003_carreira.sql`,
+  com RLS por titular).
+
+**Testes:** `npm test` (node:test via tsx) cobre SSRF, PDF textual/sem
+texto/inválido, hyperlinks de anotação, filtros anti-invenção, matching,
+mensagens sem placeholder, isolamento entre titulares, deduplicação, lease
+concorrente, reinício de worker, pausa/cancelamento, timeout após aceite com
+reconciliação idempotente, webhook falso/repetido/fora de ordem, quota e
+ausência de credenciais. `npm run typecheck` e `npm run lint` completam.
+
+**Antes de usar com dados reais:** ativar autenticação real (a sessão demo
+identifica o titular por cookie sem senha) e rodar a migração 0003 — as
+políticas de RLS e de Storage só valem com Supabase Auth.
+
 ## Roadmap
 
 - **Fase 2:** WhatsApp Business, Gmail/Calendar, cadências automatizadas com opt-out/LGPD, relatórios avançados.

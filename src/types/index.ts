@@ -3,6 +3,8 @@
  * Espelha o schema SQL em /database/migrations
  * ============================================================ */
 
+import type { CareerData } from "@/types/career";
+
 export type Role = "owner" | "admin" | "sdr" | "vendedor" | "viewer";
 
 export interface Organization {
@@ -469,6 +471,8 @@ export interface Database {
   prospecting_jobs: ProspectingJob[];
   /** IDs de origem já entregues em prospecções — garante empresas novas a cada busca */
   seen_source_ids?: string[];
+  /** Módulo Carreira (currículos, vagas, candidaturas, fila). Criado sob demanda. */
+  career?: CareerData;
   settings: {
     default_niche: string;
     default_country: string;

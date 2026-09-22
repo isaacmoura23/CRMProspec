@@ -4,6 +4,7 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import {
   Bell,
+  BriefcaseBusiness,
   CheckSquare,
   Compass,
   CornerDownLeft,
@@ -25,6 +26,9 @@ const QUICK_ACTIONS = [
   { label: "Ir para Leads", href: "/leads", icon: Target },
   { label: "Ir para o Pipeline", href: "/pipeline", icon: Workflow },
   { label: "Criar tarefa", href: "/tarefas?nova=1", icon: CheckSquare },
+  { label: "Carreira: enviar currículo", href: "/carreira?aba=curriculo", icon: BriefcaseBusiness },
+  { label: "Carreira: vagas compatíveis", href: "/carreira?aba=vagas", icon: BriefcaseBusiness },
+  { label: "Carreira: minhas candidaturas", href: "/carreira?aba=candidaturas", icon: BriefcaseBusiness },
   { label: "Abrir notificações", href: "/dashboard?notificacoes=1", icon: Bell },
 ];
 

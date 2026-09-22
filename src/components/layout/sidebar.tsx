@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import {
   BarChart3,
   Bot,
+  BriefcaseBusiness,
   Building2,
   Calendar,
   CheckSquare,
@@ -48,6 +49,10 @@ const SECTIONS: Array<{ title: string | null; items: NavItem[] }> = [
       { href: "/campanhas", label: "Campanhas", icon: Calendar },
       { href: "/automacoes", label: "Automações", icon: Bot },
     ],
+  },
+  {
+    title: "Carreira",
+    items: [{ href: "/carreira", label: "Carreira", icon: BriefcaseBusiness }],
   },
   {
     title: "Gestão",

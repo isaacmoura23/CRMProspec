@@ -1,4 +1,4 @@
-# Estado do projeto — 23/08/2026
+# Estado do projeto — 21/09/2026
 
 Registro do que está pronto, do que está pela metade e do que falta, para
 retomar sem precisar reconstruir o contexto.
@@ -55,6 +55,22 @@ retomar sem precisar reconstruir o contexto.
   buscas repetidas trazem empresas diferentes. Verificado: 3 prospecções de
   imobiliárias em Curitiba = 30 empresas reais distintas.
 - Limite do formulário ajustado de 100 para 60 (teto do Text Search).
+
+
+### Carreira (21/09/2026)
+- Módulo novo em `/carreira`: upload de PDF, extração de perfil, análise com
+  pesos publicados + sugestões com filtro anti-invenção, inspeção de links
+  com cliente anti-SSRF, busca de vagas (Remotive/Adzuna/URL), aderência
+  explicável, campanhas com fila durável, envio por Resend/Gmail, webhook de
+  entrega, histórico com três estados independentes e exportação CSV.
+- Verificado no navegador (headless): upload → análise → sugestão aceita →
+  PDF revisado → perfil confirmado → busca (20 vagas reais do Remotive +
+  fixtures) → revisão da campanha → ativação → candidatura registrada como
+  "ação manual" (sem Resend configurado, nenhum e-mail sai).
+- Testes: `npm test` (44 casos). Lint, typecheck e build limpos.
+- Falta para produção: rodar `0003_carreira.sql`, definir `RESEND_*`,
+  `CRON_SECRET`, `CAREER_TOKEN_SECRET` e (opcional) OAuth do Gmail, Adzuna e
+  OCR. A autenticação real continua pendente — sem ela, o módulo é demo.
 
 ## Pela metade — Supabase
 

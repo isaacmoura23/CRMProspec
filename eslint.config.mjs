@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Runner e setup dos testes são CommonJS de propósito (rodam antes do tsx).
+    "tests/*.cjs",
+    "tests/stubs/**",
   ]),
 ]);
 
