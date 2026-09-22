@@ -119,9 +119,36 @@ casar com nada, e a busca diz isso em vez de terminar vazia sem explicação.
 
 ## Produção com Supabase
 
-1. Crie um projeto no Supabase e rode `database/migrations/0001_initial.sql` no SQL Editor (schema completo com RLS por organização).
-2. Preencha `NEXT_PUBLIC_SUPABASE_URL` e `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
-3. O isolamento multi-tenant é garantido por Row Level Security (`member_organizations()`).
+1. Crie um projeto no Supabase e rode, no SQL Editor:
+   - `database/migrations/0002_leads_hibrido.sql` — leads, análises e score;
+   - `database/migrations/0003_carreira.sql` — módulo Carreira e o bucket privado;
+   - `database/migrations/0004_auth.sql` — `app_users`/`app_invites` e o gatilho de cadastro.
+   (A `0001_initial.sql` é o schema completo de referência, para quando todo o
+   domínio migrar; as três acima são as fatias que rodam hoje e não dependem dela.)
+2. Preencha `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` e
+   `SUPABASE_SERVICE_ROLE_KEY`.
+3. Em **Authentication → URL Configuration**, defina a Site URL do ambiente e
+   inclua `https://SEU_HOST/auth/callback` nas Redirect URLs — é para lá que
+   voltam a confirmação de e-mail, o link mágico e a redefinição de senha.
+
+### Autenticação
+
+Com essas variáveis definidas, o login demo (escolher um usuário sem senha) dá
+lugar ao Supabase Auth: e-mail e senha, link mágico e recuperação de senha, em
+`/login`. Sem elas o modo demo continua, declarado como tal na tela.
+
+- A sessão vive em cookies; `src/proxy.ts` renova o token antes de a página
+  renderizar (Server Components não podem escrever cookies) e manda quem não
+  tem sessão para `/login?proximo=…`. A decisão que vale é a de
+  `getCurrentUser()`, junto dos dados — o proxy é só a checagem otimista.
+- `app_users` é a fonte de papel e organização. O id é o UUID de `auth.uid()`,
+  o mesmo que vai em `owner_id` no módulo Carreira: é isso que faz as políticas
+  de RLS da 0003 valerem.
+- **Papel nunca vem do cliente.** A primeira conta da instância vira `owner`;
+  quem foi convidado (Equipe → Convidar membro) entra com o papel do convite;
+  o resto entra como `viewer`.
+- Os usuários do seed desaparecem assim que existe conta real na organização.
+  Leads de demonstração atribuídos a eles passam a mostrar "—".
 
 ## Carreira (currículo, vagas e candidaturas)
 

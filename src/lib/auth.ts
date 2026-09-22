@@ -2,33 +2,43 @@ import "server-only";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { getDb } from "@/lib/store";
+import { isSupabaseAuthConfigured, getAuthUser } from "@/lib/supabase-auth";
 import { ensureLeadsLoaded } from "@/services/lead-repository";
+import { loadAuthenticatedUser } from "@/services/user-repository";
 import type { User } from "@/types";
 
 /**
  * Autenticação.
  *
- * Produção: Supabase Auth (@supabase/ssr) — habilitada quando
- * NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY existirem.
- * Modo demo: sessão via cookie assinando o usuário semente.
+ * Produção: Supabase Auth. A sessão vem dos cookies, o JWT é validado no
+ * servidor e o usuário da aplicação (papel, organização) sai de `app_users`
+ * — o id é o UUID de `auth.uid()`, que é o que as políticas de RLS comparam.
+ *
+ * Modo demo (sem NEXT_PUBLIC_SUPABASE_URL/ANON_KEY): cookie com o id de um
+ * usuário do seed, sem senha. Serve para navegar o produto sem infraestrutura
+ * e está declarado como tal na interface — nunca deve receber dado real.
  */
 
 const SESSION_COOKIE = "crm_session_user";
 
 export function isSupabaseConfigured(): boolean {
-  return Boolean(
-    process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-  );
+  return isSupabaseAuthConfigured();
 }
 
 /** Usuário da sessão atual, ou `null` quando não há sessão válida. */
 export async function getSessionUser(): Promise<User | null> {
+  if (isSupabaseAuthConfigured()) {
+    const auth = await getAuthUser();
+    if (!auth) return null;
+    // Só depois de haver sessão: é o ponto em que os leads do Supabase
+    // entram no snapshot, e uma visita anônima não precisa disso.
+    await ensureLeadsLoaded();
+    return loadAuthenticatedUser(auth);
+  }
+
   const jar = await cookies();
   const userId = jar.get(SESSION_COOKIE)?.value;
   if (!userId) return null;
-  // Ponto de entrada comum a todas as páginas autenticadas e a praticamente
-  // toda server action: é onde os leads do Supabase entram no snapshot antes
-  // de qualquer leitura.
   await ensureLeadsLoaded();
   return getDb().users.find((u) => u.id === userId) ?? null;
 }
@@ -58,6 +68,7 @@ export async function getAdminUser(): Promise<User | null> {
   return user.role === "owner" || user.role === "admin" ? user : null;
 }
 
+/** Sessão do modo demo. Não é usada quando o Supabase Auth está ativo. */
 export async function setSessionUser(userId: string) {
   const jar = await cookies();
   jar.set(SESSION_COOKIE, userId, {

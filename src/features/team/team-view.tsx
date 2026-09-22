@@ -45,7 +45,12 @@ const ROLE_DESCRIPTION: Record<Role, string> = {
   viewer: "Somente leitura",
 };
 
-export function TeamView({ members }: { members: User[] }) {
+/**
+ * `canManage` chega do servidor. A action confere o papel de novo — esconder
+ * o controle é conveniência, não segurança —, mas com papéis reais mostrar um
+ * botão que sempre recusa é só frustração.
+ */
+export function TeamView({ members, canManage }: { members: User[]; canManage: boolean }) {
   const router = useRouter();
   const { toast } = useToast();
   const [open, setOpen] = React.useState(false);
@@ -74,6 +79,7 @@ export function TeamView({ members }: { members: User[] }) {
 
   return (
     <div className="space-y-4">
+      {canManage && (
       <div className="flex justify-end">
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
@@ -90,17 +96,17 @@ export function TeamView({ members }: { members: User[] }) {
             </DialogHeader>
             <div className="space-y-3">
               <div className="space-y-1.5">
-                <Label>Nome</Label>
-                <Input value={name} onChange={(e) => setName(e.target.value)} />
+                <Label htmlFor="invite-name">Nome</Label>
+                <Input id="invite-name" value={name} onChange={(e) => setName(e.target.value)} />
               </div>
               <div className="space-y-1.5">
-                <Label>E-mail</Label>
-                <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+                <Label htmlFor="invite-email">E-mail</Label>
+                <Input id="invite-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
               </div>
               <div className="space-y-1.5">
-                <Label>Papel</Label>
+                <Label htmlFor="invite-role">Papel</Label>
                 <Select value={role} onValueChange={(v) => setRole(v as Role)}>
-                  <SelectTrigger>
+                  <SelectTrigger id="invite-role">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -124,6 +130,7 @@ export function TeamView({ members }: { members: User[] }) {
           </DialogContent>
         </Dialog>
       </div>
+      )}
 
       <div className="space-y-2">
         {members.map((m) => (
@@ -134,8 +141,8 @@ export function TeamView({ members }: { members: User[] }) {
                 <p className="text-[13px] font-medium">{m.name}</p>
                 <p className="text-xs text-muted-foreground">{m.email}</p>
               </div>
-              {m.role === "owner" ? (
-                <Badge>Owner</Badge>
+              {m.role === "owner" || !canManage ? (
+                <Badge variant={m.role === "owner" ? "default" : "neutral"}>{ROLE_LABEL[m.role]}</Badge>
               ) : (
                 <Select
                   value={m.role}

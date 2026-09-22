@@ -3,12 +3,13 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getDb, nowIso, saveDb } from "@/lib/store";
-import { getAdminUser, getCurrentUser } from "@/lib/auth";
+import { getAdminUser, getCurrentUser, isSupabaseConfigured } from "@/lib/auth";
 import { uid } from "@/lib/utils";
 import { logActivity } from "@/services/lead-service";
 import { emitEvent } from "@/services/events";
 import { deliverTestEvent, generateWebhookSecret } from "@/services/webhooks";
 import { ACTIONS, CONDITIONS, EVENT_TYPES, isEventType } from "@/services/event-catalog";
+import { persistInvite, persistMemberRole, persistUserProfile } from "@/services/user-repository";
 import type { CompanyProfile, ProposalStatus, Role } from "@/types";
 
 /* ---------------- Campanhas ---------------- */
@@ -301,6 +302,9 @@ export async function updateUserProfile(patch: { name?: string; email?: string }
     if (patch.name?.trim()) stored.name = patch.name.trim().slice(0, 120);
     if (patch.email?.trim()) stored.email = patch.email.trim().toLowerCase().slice(0, 160);
     saveDb();
+    // Com autenticação real, `app_users` é a fonte de verdade: o snapshot é
+    // recarregado dela a cada sessão e perderia a edição.
+    if (isSupabaseConfigured()) await persistUserProfile(user.id, { name: stored.name, email: stored.email });
     // Nome e avatar do usuário aparecem na topbar de todas as páginas.
     revalidatePath("/", "layout");
   }
@@ -339,13 +343,28 @@ const memberInviteSchema = z.object({
 });
 
 export async function inviteMember(name: string, email: string, role: Role): Promise<{ error?: string }> {
-  if (!(await getAdminUser())) return { error: "Apenas owner ou admin podem convidar membros." };
+  const admin = await getAdminUser();
+  if (!admin) return { error: "Apenas owner ou admin podem convidar membros." };
   const parsed = memberInviteSchema.safeParse({ name, email, role });
   if (!parsed.success) return { error: "Informe nome e e-mail válidos." };
   ({ name, email, role } = parsed.data);
   const db = getDb();
   if (db.users.some((u) => u.email.toLowerCase() === email.toLowerCase())) {
     return { error: "Já existe um membro com este e-mail." };
+  }
+  if (isSupabaseConfigured()) {
+    // Em produção o membro só existe quando ele mesmo cria a conta; o convite
+    // é o que define o papel dele no cadastro, em vez de todo mundo entrar
+    // como viewer (ou pior, escolhendo o próprio papel).
+    await persistInvite({
+      email: email.trim().toLowerCase(),
+      name: name.trim(),
+      role,
+      organizationId: admin.organization_id,
+      invitedBy: admin.id,
+    });
+    revalidatePath("/equipe");
+    return {};
   }
   db.users.push({
     id: uid("usr"),
@@ -372,6 +391,7 @@ export async function changeMemberRole(userId: string, role: Role): Promise<{ er
   if (member.role === "owner") return { error: "O papel do Owner não pode ser alterado." };
   member.role = role;
   saveDb();
+  if (isSupabaseConfigured()) await persistMemberRole(member.id, role);
   revalidatePath("/equipe");
   return {};
 }

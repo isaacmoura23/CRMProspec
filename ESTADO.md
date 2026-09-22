@@ -57,6 +57,26 @@ retomar sem precisar reconstruir o contexto.
 - Limite do formulário ajustado de 100 para 60 (teto do Text Search).
 
 
+### Autenticação real (22/09/2026)
+- Supabase Auth ativo quando `NEXT_PUBLIC_SUPABASE_URL`/`ANON_KEY` existem:
+  e-mail e senha, link mágico, recuperação de senha, confirmação por e-mail.
+  Sem as variáveis, o login demo continua igual.
+- `src/proxy.ts` (o `middleware.ts` foi renomeado no Next 16) renova o token e
+  faz a checagem otimista de rota; `getCurrentUser()` segue sendo a decisão
+  que vale.
+- `database/migrations/0004_auth.sql`: `app_users` (id = `auth.uid()`),
+  `app_invites`, gatilho de cadastro e RLS. É o que faz as políticas da 0003
+  valerem — antes o `owner_id` era um id de seed.
+- Papéis: primeira conta vira owner, convidado recebe o papel do convite, o
+  resto entra como viewer. A tela de Equipe esconde os controles de gestão de
+  quem não é owner/admin (a action já recusava).
+- Verificado no navegador contra um duplo local da API do Supabase: rota
+  protegida → login com destino guardado, senha errada, login, sessão entre
+  páginas, /login redirecionando quem já entrou, Equipe com a conta real,
+  logout, e os três caminhos de papel. Regressão do modo demo refeita.
+- **Não verificado ao vivo:** gatilho, políticas de RLS e Storage exigem um
+  Postgres real (Supabase local com Docker ou projeto na nuvem).
+
 ### Carreira (21/09/2026)
 - Módulo novo em `/carreira`: upload de PDF, extração de perfil, análise com
   pesos publicados + sugestões com filtro anti-invenção, inspeção de links
@@ -116,8 +136,8 @@ persistência para até alguém reativar.
 - **Chave sem restrição.** Está como "Restrições do aplicativo: Nenhum".
   Restringir por IP reduz o risco de uso indevido na conta de faturamento.
 - **Produção está privada** (Deployment Protection ativa na Vercel), por
-  decisão. Antes de abrir ao público seria preciso autenticação real — a tela
-  de login atual é do modo demo e entra sem senha.
+  decisão. A autenticação real já existe (ver acima): ao abrir ao público,
+  defina as variáveis do Supabase, rode a 0004 e confira as Redirect URLs.
 
 ## Não implementado (declarado como tal na interface)
 
