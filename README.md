@@ -184,7 +184,10 @@ revisar a campanha → executar candidaturas → acompanhar cada envio.
 - Fila durável (`services/career/queue.ts`): jobs com lease, tentativas,
   backoff com jitter e tratamento de 429; sobrevive a reinício. Acordada por
   `after()` nas actions, pela própria página e por cron em
-  `/api/career/worker` (`vercel.json` + `CRON_SECRET`).
+  `/api/career/worker` (`vercel.json` + `CRON_SECRET`). O cron está diário
+  porque o plano Hobby da Vercel só aceita uma execução por dia; no Pro, um
+  intervalo menor (`0 */6 * * *`) deixa as campanhas recorrentes mais
+  pontuais. Entre as execuções, quem abre a página também acorda a fila.
 - Webhook do Resend em `/api/webhooks/resend` com assinatura Svix verificada
   sobre o corpo bruto, tolerância de replay e deduplicação por `svix-id`.
 - Persistência: snapshot local em demo; com Supabase, tabelas `career_*` e
