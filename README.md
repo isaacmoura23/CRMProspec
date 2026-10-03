@@ -119,6 +119,34 @@ casar com nada, e a busca diz isso em vez de terminar vazia sem explicação.
 
 ## Produção com Supabase
 
+Caminho curto (os scripts não mostram nem registram nenhuma chave):
+
+```bash
+# 1. no painel do Supabase: crie o projeto (região São Paulo serve bem)
+# 2. SQL Editor → cole database/setup-producao.sql → Run
+node scripts/set-supabase.mjs        # pede URL e as duas chaves; gera os segredos próprios
+node scripts/verificar-supabase.mjs  # diz o que ainda falta, item por item
+npm run dev                          # confira o cadastro e o login em /login
+```
+
+Para publicar, repita as variáveis na Vercel e faça o deploy:
+
+```bash
+vercel env add NEXT_PUBLIC_SUPABASE_URL production
+vercel env add NEXT_PUBLIC_SUPABASE_ANON_KEY production
+vercel env add SUPABASE_SERVICE_ROLE_KEY production
+vercel env add CRON_SECRET production
+vercel env add CAREER_TOKEN_SECRET production
+vercel --prod
+```
+
+Em **Authentication → URL Configuration**, ponha a Site URL do ambiente e
+inclua `https://SEU_HOST/auth/callback` nas Redirect URLs. Só então desligue
+a Deployment Protection: enquanto o Supabase não estiver configurado, o site
+sobe em modo demo e o login entra **sem senha**.
+
+Passo a passo detalhado:
+
 1. Crie um projeto no Supabase e rode, no SQL Editor:
    - `database/migrations/0002_leads_hibrido.sql` — leads, análises e score;
    - `database/migrations/0003_carreira.sql` — módulo Carreira e o bucket privado;
