@@ -150,23 +150,46 @@ export async function mirrorTeam(organizationId: string): Promise<void> {
   db.users = rows.length > 0 ? rows : db.users;
 }
 
-export async function persistUserProfile(userId: string, patch: { name?: string; email?: string }): Promise<void> {
+/**
+ * As escritas abaixo devolvem o erro em vez de apenas registrá-lo.
+ *
+ * Quando `app_users` e a fonte de verdade, uma escrita recusada pelo banco
+ * (politica de RLS, e-mail duplicado, tabela ausente) significa que a
+ * alteracao se perde no proximo carregamento — e, antes disto, a action
+ * concluia e a interface dizia "salvo".
+ */
+export async function persistUserProfile(userId: string, patch: { name?: string; email?: string }): Promise<{ error?: string }> {
   const supabase = getSupabase();
-  if (!supabase || !isSupabaseEnabled()) return;
+  if (!supabase || !isSupabaseEnabled()) return {};
   const update: Record<string, string> = { updated_at: new Date().toISOString() };
   if (patch.name) update.name = patch.name;
   if (patch.email) update.email = patch.email;
   const { error } = await supabase.from(TABLE_USERS).update(update).eq("id", userId);
-  if (error) console.error("[auth] falha ao atualizar perfil:", error.message);
   invalidateUserCache(userId);
+  if (error) {
+    console.error("[auth] falha ao atualizar perfil:", error.message);
+    return { error: error.code === "23505" ? "Ja existe uma conta com este e-mail." : `O banco recusou a alteracao: ${error.message}` };
+  }
+  return {};
 }
 
-export async function persistMemberRole(userId: string, role: Role): Promise<void> {
+export async function persistMemberRole(userId: string, role: Role): Promise<{ error?: string }> {
   const supabase = getSupabase();
-  if (!supabase || !isSupabaseEnabled()) return;
-  const { error } = await supabase.from(TABLE_USERS).update({ role, updated_at: new Date().toISOString() }).eq("id", userId);
-  if (error) console.error("[auth] falha ao atualizar papel:", error.message);
+  if (!supabase || !isSupabaseEnabled()) return {};
+  const { data, error } = await supabase
+    .from(TABLE_USERS)
+    .update({ role, updated_at: new Date().toISOString() })
+    .eq("id", userId)
+    .select("id");
   invalidateUserCache(userId);
+  if (error) {
+    console.error("[auth] falha ao atualizar papel:", error.message);
+    return { error: `O banco recusou a alteracao de papel: ${error.message}` };
+  }
+  // Zero linhas = o id nao existe em app_users (membro so do snapshot) ou a
+  // politica recusou. Nos dois casos o papel NAO mudou no banco.
+  if ((data?.length ?? 0) === 0) return { error: "O papel nao foi alterado no banco: esta pessoa ainda nao criou a conta." };
+  return {};
 }
 
 /**
@@ -174,9 +197,9 @@ export async function persistMemberRole(userId: string, role: Role): Promise<voi
  * combinado — é o que impede que qualquer pessoa que descubra a URL entre
  * como vendedor em vez de `viewer`.
  */
-export async function persistInvite(invite: { email: string; name: string; role: Role; organizationId: string; invitedBy: string }): Promise<void> {
+export async function persistInvite(invite: { email: string; name: string; role: Role; organizationId: string; invitedBy: string }): Promise<{ error?: string }> {
   const supabase = getSupabase();
-  if (!supabase || !isSupabaseEnabled()) return;
+  if (!supabase || !isSupabaseEnabled()) return { error: "Supabase nao esta configurado no servidor." };
   const { error } = await supabase.from(TABLE_INVITES).upsert(
     {
       email: invite.email.toLowerCase(),
@@ -188,5 +211,9 @@ export async function persistInvite(invite: { email: string; name: string; role:
     },
     { onConflict: "email" }
   );
-  if (error) console.error("[auth] falha ao registrar convite:", error.message);
+  if (error) {
+    console.error("[auth] falha ao registrar convite:", error.message);
+    return { error: `O convite nao foi registrado: ${error.message}` };
+  }
+  return {};
 }

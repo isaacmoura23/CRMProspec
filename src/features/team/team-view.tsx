@@ -67,7 +67,7 @@ export function TeamView({ members, canManage }: { members: User[]; canManage: b
         toast(res.error, "error");
         return;
       }
-      toast("Membro adicionado à equipe.");
+      toast("Convite registrado. A pessoa entra com este papel ao criar a conta.");
       setOpen(false);
       setName("");
       setEmail("");
@@ -91,7 +91,9 @@ export function TeamView({ members, canManage }: { members: User[]; canManage: b
             <DialogHeader>
               <DialogTitle>Convidar membro</DialogTitle>
               <DialogDescription>
-                Em produção o convite é enviado por e-mail via Supabase Auth.
+                O convite define o papel que a pessoa terá ao criar a conta. O
+                sistema não envia e-mail: avise você mesmo e peça que ela se
+                cadastre com este endereço.
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-3">

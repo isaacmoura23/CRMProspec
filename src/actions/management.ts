@@ -294,20 +294,30 @@ export async function updateCompanyProfile(
   return {};
 }
 
-export async function updateUserProfile(patch: { name?: string; email?: string }): Promise<void> {
+export async function updateUserProfile(patch: { name?: string; email?: string }): Promise<{ error?: string }> {
   const db = getDb();
   const user = await getCurrentUser();
   const stored = db.users.find((u) => u.id === user.id);
-  if (stored) {
-    if (patch.name?.trim()) stored.name = patch.name.trim().slice(0, 120);
-    if (patch.email?.trim()) stored.email = patch.email.trim().toLowerCase().slice(0, 160);
-    saveDb();
-    // Com autenticação real, `app_users` é a fonte de verdade: o snapshot é
-    // recarregado dela a cada sessão e perderia a edição.
-    if (isSupabaseConfigured()) await persistUserProfile(user.id, { name: stored.name, email: stored.email });
-    // Nome e avatar do usuário aparecem na topbar de todas as páginas.
-    revalidatePath("/", "layout");
+  if (!stored) return { error: "Usuário da sessão não encontrado." };
+
+  const before = { name: stored.name, email: stored.email };
+  if (patch.name?.trim()) stored.name = patch.name.trim().slice(0, 120);
+  if (patch.email?.trim()) stored.email = patch.email.trim().toLowerCase().slice(0, 160);
+
+  // Com autenticação real, `app_users` é a fonte de verdade: o snapshot é
+  // recarregado dela a cada sessão. Se o banco recusar, a edição local é
+  // desfeita — melhor um erro agora do que um "salvo" que some depois.
+  if (isSupabaseConfigured()) {
+    const res = await persistUserProfile(user.id, { name: stored.name, email: stored.email });
+    if (res.error) {
+      Object.assign(stored, before);
+      return res;
+    }
   }
+  saveDb();
+  // Nome e avatar do usuário aparecem na topbar de todas as páginas.
+  revalidatePath("/", "layout");
+  return {};
 }
 
 export async function completeOnboarding(data: {
@@ -356,13 +366,14 @@ export async function inviteMember(name: string, email: string, role: Role): Pro
     // Em produção o membro só existe quando ele mesmo cria a conta; o convite
     // é o que define o papel dele no cadastro, em vez de todo mundo entrar
     // como viewer (ou pior, escolhendo o próprio papel).
-    await persistInvite({
+    const res = await persistInvite({
       email: email.trim().toLowerCase(),
       name: name.trim(),
       role,
       organizationId: admin.organization_id,
       invitedBy: admin.id,
     });
+    if (res.error) return res;
     revalidatePath("/equipe");
     return {};
   }
@@ -389,9 +400,16 @@ export async function changeMemberRole(userId: string, role: Role): Promise<{ er
   const member = db.users.find((u) => u.id === userId);
   if (!member) return {};
   if (member.role === "owner") return { error: "O papel do Owner não pode ser alterado." };
+  const previous = member.role;
   member.role = role;
+  if (isSupabaseConfigured()) {
+    const res = await persistMemberRole(member.id, role);
+    if (res.error) {
+      member.role = previous;
+      return res;
+    }
+  }
   saveDb();
-  if (isSupabaseConfigured()) await persistMemberRole(member.id, role);
   revalidatePath("/equipe");
   return {};
 }
