@@ -2,11 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 import { getDb, saveDb } from "@/lib/store";
-import { getCurrentUser } from "@/lib/auth";
+import { getAdminUser } from "@/lib/auth";
+import { ADMIN_DENIED } from "@/lib/permissions";
 import { uid } from "@/lib/utils";
 
 export async function createStage(name: string): Promise<{ error?: string }> {
-  await getCurrentUser();
+  if (!(await getAdminUser())) return { error: ADMIN_DENIED };
   const trimmed = name.trim();
   if (trimmed.length < 2) return { error: "Nome muito curto." };
   const db = getDb();
@@ -36,8 +37,8 @@ export async function createStage(name: string): Promise<{ error?: string }> {
   return {};
 }
 
-export async function renameStage(stageId: string, name: string): Promise<void> {
-  await getCurrentUser();
+export async function renameStage(stageId: string, name: string): Promise<{ error?: string }> {
+  if (!(await getAdminUser())) return { error: ADMIN_DENIED };
   const db = getDb();
   const stage = db.pipeline_stages.find((s) => s.id === stageId);
   if (stage && name.trim().length >= 2) {
@@ -45,10 +46,11 @@ export async function renameStage(stageId: string, name: string): Promise<void> 
     saveDb();
     revalidatePath("/pipeline");
   }
+  return {};
 }
 
 export async function deleteStage(stageId: string): Promise<{ error?: string }> {
-  await getCurrentUser();
+  if (!(await getAdminUser())) return { error: ADMIN_DENIED };
   const db = getDb();
   const stage = db.pipeline_stages.find((s) => s.id === stageId);
   if (!stage) return {};
@@ -61,16 +63,17 @@ export async function deleteStage(stageId: string): Promise<{ error?: string }> 
   return {};
 }
 
-export async function moveStage(stageId: string, direction: "left" | "right"): Promise<void> {
-  await getCurrentUser();
+export async function moveStage(stageId: string, direction: "left" | "right"): Promise<{ error?: string }> {
+  if (!(await getAdminUser())) return { error: ADMIN_DENIED };
   const db = getDb();
   const ordered = [...db.pipeline_stages].sort((a, b) => a.order - b.order);
   const idx = ordered.findIndex((s) => s.id === stageId);
   const swapIdx = direction === "left" ? idx - 1 : idx + 1;
-  if (idx < 0 || swapIdx < 0 || swapIdx >= ordered.length) return;
+  if (idx < 0 || swapIdx < 0 || swapIdx >= ordered.length) return {};
   const a = ordered[idx]!;
   const b = ordered[swapIdx]!;
   [a.order, b.order] = [b.order, a.order];
   saveDb();
   revalidatePath("/pipeline");
+  return {};
 }

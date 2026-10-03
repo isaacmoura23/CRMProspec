@@ -3,7 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getDb, nowIso, saveDb } from "@/lib/store";
-import { getAdminUser, getCurrentUser, isSupabaseConfigured } from "@/lib/auth";
+import { getAdminUser, getCurrentUser, getWriterUser, isSupabaseConfigured } from "@/lib/auth";
+import { ADMIN_DENIED, WRITE_DENIED } from "@/lib/permissions";
 import { uid } from "@/lib/utils";
 import { logActivity } from "@/services/lead-service";
 import { emitEvent } from "@/services/events";
@@ -15,7 +16,7 @@ import type { CompanyProfile, ProposalStatus, Role } from "@/types";
 /* ---------------- Campanhas ---------------- */
 
 export async function createCampaign(name: string, description?: string): Promise<{ error?: string }> {
-  await getCurrentUser();
+  if (!(await getWriterUser())) return { error: WRITE_DENIED };
   if (name.trim().length < 3) return { error: "Nome muito curto." };
   const db = getDb();
   db.campaigns.push({
@@ -31,8 +32,8 @@ export async function createCampaign(name: string, description?: string): Promis
   return {};
 }
 
-export async function archiveCampaign(id: string): Promise<void> {
-  await getCurrentUser();
+export async function archiveCampaign(id: string): Promise<{ error?: string }> {
+  if (!(await getWriterUser())) return { error: WRITE_DENIED };
   const db = getDb();
   const c = db.campaigns.find((c) => c.id === id);
   if (c) {
@@ -40,6 +41,7 @@ export async function archiveCampaign(id: string): Promise<void> {
     saveDb();
     revalidatePath("/campanhas");
   }
+  return {};
 }
 
 /* ---------------- Propostas ---------------- */
@@ -71,7 +73,8 @@ export async function createProposal(input: ProposalInput): Promise<{ error?: st
   }
   const d = parsed.data;
   const db = getDb();
-  const user = await getCurrentUser();
+  const user = await getWriterUser();
+  if (!user) return { error: WRITE_DENIED };
   // Sem esta checagem a proposta ficava órfã, apontando para um lead inexistente.
   if (!db.leads.some((l) => l.id === d.lead_id)) {
     return { error: "Selecione um lead válido para a proposta." };
@@ -107,12 +110,13 @@ export async function createProposal(input: ProposalInput): Promise<{ error?: st
   return {};
 }
 
-export async function setProposalStatus(id: string, status: ProposalStatus): Promise<void> {
-  if (!proposalStatusSchema.safeParse(status).success) return;
+export async function setProposalStatus(id: string, status: ProposalStatus): Promise<{ error?: string }> {
+  if (!proposalStatusSchema.safeParse(status).success) return {};
   const db = getDb();
   const p = db.proposals.find((p) => p.id === id);
-  if (!p) return;
-  const user = await getCurrentUser();
+  if (!p) return { error: "Proposta não encontrada." };
+  const user = await getWriterUser();
+  if (!user) return { error: WRITE_DENIED };
   p.status = status;
   p.updated_at = nowIso();
 
@@ -152,6 +156,7 @@ export async function setProposalStatus(id: string, status: ProposalStatus): Pro
   revalidatePath("/leads");
   revalidatePath("/tarefas");
   revalidatePath(`/leads/${p.lead_id}`);
+  return {};
 }
 
 /* ---------------- Automações ---------------- */
@@ -168,7 +173,7 @@ const automationSchema = z.object({
 export type AutomationInput = z.infer<typeof automationSchema>;
 
 export async function createAutomation(input: AutomationInput): Promise<{ error?: string }> {
-  await getCurrentUser();
+  if (!(await getAdminUser())) return { error: ADMIN_DENIED };
   const parsed = automationSchema.safeParse(input);
   if (!parsed.success) return { error: "Preencha gatilho, condição e pelo menos uma ação." };
   const db = getDb();
@@ -185,8 +190,8 @@ export async function createAutomation(input: AutomationInput): Promise<{ error?
   return {};
 }
 
-export async function toggleAutomation(id: string): Promise<void> {
-  await getCurrentUser();
+export async function toggleAutomation(id: string): Promise<{ error?: string }> {
+  if (!(await getAdminUser())) return { error: ADMIN_DENIED };
   const db = getDb();
   const rule = db.automation_rules.find((r) => r.id === id);
   if (rule) {
@@ -194,14 +199,16 @@ export async function toggleAutomation(id: string): Promise<void> {
     saveDb();
     revalidatePath("/automacoes");
   }
+  return {};
 }
 
-export async function deleteAutomation(id: string): Promise<void> {
-  await getCurrentUser();
+export async function deleteAutomation(id: string): Promise<{ error?: string }> {
+  if (!(await getAdminUser())) return { error: ADMIN_DENIED };
   const db = getDb();
   db.automation_rules = db.automation_rules.filter((r) => r.id !== id);
   saveDb();
   revalidatePath("/automacoes");
+  return {};
 }
 
 /* ---------------- Configurações ---------------- */
@@ -269,7 +276,7 @@ export async function updateSettings(patch: Partial<{
   message_tone: string;
   message_language: string;
 }>): Promise<{ error?: string }> {
-  await getCurrentUser();
+  if (!(await getAdminUser())) return { error: ADMIN_DENIED };
   const parsed = settingsPatchSchema.safeParse(patch);
   if (!parsed.success) return { error: "Configurações inválidas." };
   const db = getDb();
@@ -282,7 +289,7 @@ export async function updateSettings(patch: Partial<{
 export async function updateCompanyProfile(
   profile: Omit<CompanyProfile, "organization_id">
 ): Promise<{ error?: string }> {
-  await getCurrentUser();
+  if (!(await getAdminUser())) return { error: ADMIN_DENIED };
   // Sem os defaults, um perfil salvo sem `never_say`/`main_services` fazia
   // os prompts quebrarem com "Cannot read properties of undefined (join)".
   const parsed = companyProfileSchema.safeParse(profile);
@@ -327,8 +334,9 @@ export async function completeOnboarding(data: {
   priority_niches: string[];
   default_country: string;
   communication_style: string;
-}): Promise<void> {
-  await getCurrentUser();
+}): Promise<{ error?: string }> {
+  // Define nome da organização e perfil da empresa: configuração, não operação.
+  if (!(await getAdminUser())) return { error: ADMIN_DENIED };
   const db = getDb();
   db.organization.name = data.company_name || db.organization.name;
   db.company_profile.company_name = data.company_name || db.company_profile.company_name;
@@ -340,6 +348,7 @@ export async function completeOnboarding(data: {
   db.onboarding_completed = true;
   saveDb();
   revalidatePath("/", "layout");
+  return {};
 }
 
 /* ---------------- Equipe ---------------- */
@@ -357,6 +366,10 @@ export async function inviteMember(name: string, email: string, role: Role): Pro
   if (!admin) return { error: "Apenas owner ou admin podem convidar membros." };
   const parsed = memberInviteSchema.safeParse({ name, email, role });
   if (!parsed.success) return { error: "Informe nome e e-mail válidos." };
+  // `changeMemberRole` recusa promover a owner; aceitar aqui seria a mesma
+  // escalada por outro caminho — e um owner criado assim não pode ser
+  // rebaixado por ninguém.
+  if (parsed.data.role === "owner") return { error: "Não é possível convidar outro Owner." };
   ({ name, email, role } = parsed.data);
   const db = getDb();
   if (db.users.some((u) => u.email.toLowerCase() === email.toLowerCase())) {

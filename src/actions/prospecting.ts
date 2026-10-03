@@ -2,7 +2,8 @@
 
 import { z } from "zod";
 import { getDb, nowIso, saveDb } from "@/lib/store";
-import { getCurrentUser } from "@/lib/auth";
+import { getCurrentUser, getWriterUser } from "@/lib/auth";
+import { WRITE_DENIED } from "@/lib/permissions";
 import { createProspectingJob } from "@/jobs/prospecting";
 import type { ProspectingJob } from "@/types";
 
@@ -39,7 +40,8 @@ export async function startProspecting(
   if (parsed.data.filters.noWebsite && parsed.data.filters.hasWebsite) {
     return { error: "Os filtros “sem site” e “possui site” não podem ser combinados." };
   }
-  const user = await getCurrentUser();
+  const user = await getWriterUser();
+  if (!user) return { error: WRITE_DENIED };
   const job = createProspectingJob(parsed.data, user.id);
   return { jobId: job.id };
 }

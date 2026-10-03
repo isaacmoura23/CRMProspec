@@ -2,7 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { getDb, nowIso, saveDb } from "@/lib/store";
-import { getCurrentUser } from "@/lib/auth";
+import { getCurrentUser, getWriterUser } from "@/lib/auth";
+import { WRITE_DENIED } from "@/lib/permissions";
 import { uid } from "@/lib/utils";
 import { aiClassifyResponse, aiGenerateOutreach, aiHandleObjection } from "@/ai";
 import { logActivity } from "@/services/lead-service";
@@ -33,7 +34,8 @@ export async function generateOutreach(
     return { error: "Analise a oportunidade antes de gerar a abordagem — a mensagem usa o problema identificado." };
   }
 
-  const user = await getCurrentUser();
+  const user = await getWriterUser();
+  if (!user) return { error: WRITE_DENIED };
   const followUpContext =
     format === "follow_up"
       ? db.messages
@@ -77,8 +79,8 @@ export async function generateOutreach(
   }
 }
 
-export async function saveGeneration(generationId: string): Promise<void> {
-  await getCurrentUser();
+export async function saveGeneration(generationId: string): Promise<{ error?: string }> {
+  if (!(await getWriterUser())) return { error: WRITE_DENIED };
   const db = getDb();
   const gen = db.ai_generations.find((g) => g.id === generationId);
   if (gen) {
@@ -86,14 +88,16 @@ export async function saveGeneration(generationId: string): Promise<void> {
     saveDb();
     revalidatePath(`/leads/${gen.lead_id}`);
   }
+  return {};
 }
 
 /** Registra que o primeiro contato / uma mensagem foi enviada manualmente */
-export async function registerContactMade(leadId: string, channel: string): Promise<void> {
+export async function registerContactMade(leadId: string, channel: string): Promise<{ error?: string }> {
   const db = getDb();
   const lead = db.leads.find((l) => l.id === leadId);
-  if (!lead) return;
-  const user = await getCurrentUser();
+  if (!lead) return { error: "Lead não encontrado." };
+  const user = await getWriterUser();
+  if (!user) return { error: WRITE_DENIED };
   const isFirst = !lead.last_contact_at;
   lead.last_contact_at = nowIso();
   if (["novo", "analisado", "qualificado", "pronto_contato"].includes(lead.status)) {
@@ -114,12 +118,14 @@ export async function registerContactMade(leadId: string, channel: string): Prom
   saveDb();
   revalidatePath(`/leads/${leadId}`);
   revalidatePath("/leads");
+  return {};
 }
 
 export async function classifyIncoming(
   messageId: string
 ): Promise<{ label: string } | { error: string }> {
-  await getCurrentUser();
+  // Grava a classificação na mensagem, então é escrita.
+  if (!(await getWriterUser())) return { error: WRITE_DENIED };
   const db = getDb();
   const msg = db.messages.find((m) => m.id === messageId);
   if (!msg) return { error: "Mensagem não encontrada." };

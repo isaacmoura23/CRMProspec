@@ -6,6 +6,7 @@ import { Loader2, StickyNote } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Avatar } from "@/components/ui/avatar";
+import { useToast } from "@/components/ui/toast";
 import { addNote } from "@/actions/leads";
 import { formatDateTime } from "@/lib/format";
 import type { Note, User } from "@/types";
@@ -20,6 +21,7 @@ export function NotesPanel({
   users: User[];
 }) {
   const router = useRouter();
+  const { toast } = useToast();
   const [content, setContent] = React.useState("");
   const [saving, setSaving] = React.useState(false);
 
@@ -27,7 +29,11 @@ export function NotesPanel({
     if (!content.trim()) return;
     setSaving(true);
     try {
-      await addNote(leadId, content);
+      const res = await addNote(leadId, content);
+      if (res.error) {
+        toast(res.error, "error");
+        return;
+      }
       setContent("");
       router.refresh();
     } finally {

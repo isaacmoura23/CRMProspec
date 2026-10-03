@@ -2,18 +2,20 @@
 
 import { revalidatePath } from "next/cache";
 import { getDb, nowIso, saveDb } from "@/lib/store";
-import { getCurrentUser } from "@/lib/auth";
+import { getCurrentUser, getWriterUser } from "@/lib/auth";
+import { WRITE_DENIED } from "@/lib/permissions";
 import { uid } from "@/lib/utils";
 import { aiClassifyResponse } from "@/ai";
 import { logActivity } from "@/services/lead-service";
 import { emitEvent } from "@/services/events";
 
-export async function sendMessage(conversationId: string, content: string): Promise<void> {
-  if (!content.trim()) return;
+export async function sendMessage(conversationId: string, content: string): Promise<{ error?: string }> {
+  if (!content.trim()) return {};
   const db = getDb();
   const conv = db.conversations.find((c) => c.id === conversationId);
-  if (!conv) return;
-  const user = await getCurrentUser();
+  if (!conv) return { error: "Conversa não encontrada." };
+  const user = await getWriterUser();
+  if (!user) return { error: WRITE_DENIED };
 
   db.messages.push({
     id: uid("msg"),
@@ -45,6 +47,7 @@ export async function sendMessage(conversationId: string, content: string): Prom
     revalidatePath("/leads");
     revalidatePath(`/leads/${lead.id}`);
   }
+  return {};
 }
 
 /**
@@ -52,12 +55,13 @@ export async function sendMessage(conversationId: string, content: string): Prom
  * Classifica com IA, pausa cadências e notifica — o mesmo fluxo que o
  * webhook do WhatsApp Business executará quando conectado.
  */
-export async function simulateInbound(conversationId: string, content: string): Promise<void> {
-  const actor = await getCurrentUser();
-  if (!content.trim()) return;
+export async function simulateInbound(conversationId: string, content: string): Promise<{ error?: string }> {
+  const actor = await getWriterUser();
+  if (!actor) return { error: WRITE_DENIED };
+  if (!content.trim()) return {};
   const db = getDb();
   const conv = db.conversations.find((c) => c.id === conversationId);
-  if (!conv) return;
+  if (!conv) return {};
 
   const { output } = await aiClassifyResponse(content.trim());
 
@@ -119,6 +123,7 @@ export async function simulateInbound(conversationId: string, content: string): 
   revalidatePath("/follow-ups");
   // A notificação criada aparece no sino da topbar, montada no layout.
   revalidatePath("/", "layout");
+  return {};
 }
 
 export async function markConversationRead(conversationId: string): Promise<void> {

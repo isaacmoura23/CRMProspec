@@ -3,7 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getDb, nowIso, saveDb } from "@/lib/store";
-import { getCurrentUser } from "@/lib/auth";
+import { getWriterUser } from "@/lib/auth";
+import { WRITE_DENIED } from "@/lib/permissions";
 import { uid } from "@/lib/utils";
 import { logActivity } from "@/services/lead-service";
 import { emitEvent } from "@/services/events";
@@ -27,7 +28,8 @@ export async function createTask(input: TaskInput): Promise<{ id: string } | { e
   if (!parsed.success) return { error: "Preencha título e data da tarefa." };
   const d = parsed.data;
   const db = getDb();
-  const user = await getCurrentUser();
+  const user = await getWriterUser();
+  if (!user) return { error: WRITE_DENIED };
 
   const due = new Date(`${d.due_date}T${d.due_time || "09:00"}:00`);
   if (isNaN(due.getTime())) return { error: "Data inválida." };
@@ -82,11 +84,12 @@ function taskPayload(task: Task) {
   };
 }
 
-export async function toggleTask(taskId: string): Promise<void> {
+export async function toggleTask(taskId: string): Promise<{ error?: string }> {
   const db = getDb();
   const task = db.tasks.find((t) => t.id === taskId);
-  if (!task) return;
-  const user = await getCurrentUser();
+  if (!task) return { error: "Tarefa não encontrada." };
+  const user = await getWriterUser();
+  if (!user) return { error: WRITE_DENIED };
   task.completed = !task.completed;
   task.completed_at = task.completed ? nowIso() : null;
 
@@ -115,13 +118,14 @@ export async function toggleTask(taskId: string): Promise<void> {
   revalidatePath("/follow-ups");
   revalidatePath("/leads");
   if (task.lead_id) revalidatePath(`/leads/${task.lead_id}`);
+  return {};
 }
 
-export async function deleteTask(taskId: string): Promise<void> {
-  await getCurrentUser();
+export async function deleteTask(taskId: string): Promise<{ error?: string }> {
+  if (!(await getWriterUser())) return { error: WRITE_DENIED };
   const db = getDb();
   const task = db.tasks.find((t) => t.id === taskId);
-  if (!task) return;
+  if (!task) return {};
   db.tasks = db.tasks.filter((t) => t.id !== taskId);
 
   // O agendamento vive em dois lugares: a tarefa e o `next_follow_up_at` do
@@ -140,4 +144,5 @@ export async function deleteTask(taskId: string): Promise<void> {
   revalidatePath("/tarefas");
   revalidatePath("/follow-ups");
   if (task.lead_id) revalidatePath(`/leads/${task.lead_id}`);
+  return {};
 }

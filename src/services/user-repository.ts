@@ -109,10 +109,20 @@ export async function loadAuthenticatedUser(auth: { id: string; email: string })
     return user;
   }
 
-  const [{ count }, invite] = await Promise.all([
+  const [existing, invite] = await Promise.all([
     supabase.from(TABLE_USERS).select("id", { count: "exact", head: true }),
-    supabase.from(TABLE_INVITES).select("*").ilike("email", auth.email).maybeSingle(),
+    // `eq` com o endereço em minúsculas, não `ilike`: `%` e `_` são curingas
+    // no ilike e o e-mail vem do próprio cadastro — casaria com o convite de
+    // outra pessoa e herdaria o papel dela.
+    supabase.from(TABLE_INVITES).select("*").eq("email", auth.email.toLowerCase()).maybeSingle(),
   ]);
+  // Falha na contagem não pode virar "é a primeira conta" — seria promover a
+  // owner por causa de um erro de rede.
+  if (existing.error) {
+    console.error("[auth] não foi possível contar as contas existentes:", existing.error.message);
+    return null;
+  }
+  const count = existing.count;
   const inviteRow = invite.data as { organization_id: string; name: string; role: Role } | null;
   const row: AppUserRow = {
     id: auth.id,
@@ -128,7 +138,7 @@ export async function loadAuthenticatedUser(auth: { id: string; email: string })
     console.error("[auth] falha ao criar app_users:", insertError.message);
     return null;
   }
-  if (inviteRow) await supabase.from(TABLE_INVITES).update({ accepted_at: new Date().toISOString() }).ilike("email", auth.email);
+  if (inviteRow) await supabase.from(TABLE_INVITES).update({ accepted_at: new Date().toISOString() }).eq("email", auth.email.toLowerCase());
 
   const user = mirror(toUser(row));
   await mirrorTeam(user.organization_id);

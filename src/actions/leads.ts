@@ -3,7 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getDb, nowIso, saveDb } from "@/lib/store";
-import { getCurrentUser } from "@/lib/auth";
+import { getCurrentUser, getWriterUser } from "@/lib/auth";
+import { WRITE_DENIED } from "@/lib/permissions";
 import { uid } from "@/lib/utils";
 import { createLeadFromRaw, logActivity, recomputeLeadScore, setLeadStage, setLeadStatus } from "@/services/lead-service";
 import { findDuplicate } from "@/services/dedupe";
@@ -27,7 +28,7 @@ const manualLeadSchema = z.object({
 
 export type ManualLeadInput = z.infer<typeof manualLeadSchema>;
 
-export const leadStatusSchema = z.enum([
+const leadStatusSchema = z.enum([
   "novo",
   "analisado",
   "qualificado",
@@ -76,7 +77,8 @@ export async function createLeadManual(
   }
   const d = parsed.data;
   const db = getDb();
-  const user = await getCurrentUser();
+  const user = await getWriterUser();
+  if (!user) return { error: WRITE_DENIED };
 
   const raw: RawLead = {
     company_name: d.company_name,
@@ -136,15 +138,15 @@ export async function updateLeadField(
       | "next_follow_up_at"
     >
   >
-): Promise<void> {
-  await getCurrentUser();
+): Promise<{ error?: string }> {
+  if (!(await getWriterUser())) return { error: WRITE_DENIED };
   const db = getDb();
   const lead = db.leads.find((l) => l.id === leadId);
-  if (!lead) return;
+  if (!lead) return { error: "Lead não encontrado." };
   // Copia apenas os campos editáveis: `Object.assign(lead, patch)` com um
   // patch cru deixava sobrescrever id, organization_id, lead_score e status.
   const parsed = leadFieldPatchSchema.safeParse(patch);
-  if (!parsed.success) return;
+  if (!parsed.success) return { error: "Dados inválidos para este campo." };
   Object.assign(lead, parsed.data, { updated_at: nowIso() });
   saveDb();
   revalidatePath(`/leads/${leadId}`);
@@ -152,29 +154,35 @@ export async function updateLeadField(
   // `next_follow_up_at` e `assigned_to` alimentam estas duas telas.
   revalidatePath("/follow-ups");
   revalidatePath("/tarefas");
+  return {};
 }
 
-export async function changeLeadStatus(leadId: string, status: LeadStatus): Promise<void> {
-  const user = await getCurrentUser();
-  if (!leadStatusSchema.safeParse(status).success) return;
+export async function changeLeadStatus(leadId: string, status: LeadStatus): Promise<{ error?: string }> {
+  const user = await getWriterUser();
+  if (!user) return { error: WRITE_DENIED };
+  if (!leadStatusSchema.safeParse(status).success) return { error: "Status inválido." };
   setLeadStatus(leadId, status, user.id);
   revalidatePath(`/leads/${leadId}`);
   revalidatePath("/leads");
   revalidatePath("/pipeline");
+  return {};
 }
 
-export async function changeLeadStage(leadId: string, stageId: string): Promise<void> {
-  const user = await getCurrentUser();
+export async function changeLeadStage(leadId: string, stageId: string): Promise<{ error?: string }> {
+  const user = await getWriterUser();
+  if (!user) return { error: WRITE_DENIED };
   setLeadStage(leadId, stageId, user.id);
   revalidatePath("/pipeline");
   revalidatePath(`/leads/${leadId}`);
+  return {};
 }
 
 export async function analyzeLead(leadId: string): Promise<{ ok: boolean; error?: string }> {
   const db = getDb();
   const lead = db.leads.find((l) => l.id === leadId);
   if (!lead) return { ok: false, error: "Lead não encontrado." };
-  const user = await getCurrentUser();
+  const user = await getWriterUser();
+  if (!user) return { ok: false, error: WRITE_DENIED };
   try {
     await analyzeAndStore(lead, user.id);
     recomputeLeadScore(leadId);
@@ -187,10 +195,11 @@ export async function analyzeLead(leadId: string): Promise<{ ok: boolean; error?
   }
 }
 
-export async function addNote(leadId: string, content: string): Promise<void> {
-  if (!content.trim()) return;
+export async function addNote(leadId: string, content: string): Promise<{ error?: string }> {
+  if (!content.trim()) return { error: "Escreva a nota antes de salvar." };
   const db = getDb();
-  const user = await getCurrentUser();
+  const user = await getWriterUser();
+  if (!user) return { error: WRITE_DENIED };
   db.notes.push({
     id: uid("note"),
     lead_id: leadId,
@@ -201,13 +210,15 @@ export async function addNote(leadId: string, content: string): Promise<void> {
   logActivity(leadId, "nota_adicionada", "Nota interna adicionada", user.id);
   saveDb();
   revalidatePath(`/leads/${leadId}`);
+  return {};
 }
 
 /* ---------------- Ações em lote ---------------- */
 
-export async function bulkArchive(ids: string[]): Promise<void> {
+export async function bulkArchive(ids: string[]): Promise<{ error?: string }> {
   const db = getDb();
-  const user = await getCurrentUser();
+  const user = await getWriterUser();
+  if (!user) return { error: WRITE_DENIED };
   // Leads arquivados também somem do board.
   for (const id of ids) {
     const lead = db.leads.find((l) => l.id === id);
@@ -229,11 +240,13 @@ export async function bulkArchive(ids: string[]): Promise<void> {
   saveDb();
   revalidatePath("/leads");
   revalidatePath("/pipeline");
+  return {};
 }
 
-export async function bulkAssign(ids: string[], userId: string): Promise<void> {
+export async function bulkAssign(ids: string[], userId: string): Promise<{ error?: string }> {
   const db = getDb();
-  const actor = await getCurrentUser();
+  const actor = await getWriterUser();
+  if (!actor) return { error: WRITE_DENIED };
   const target = db.users.find((u) => u.id === userId);
   for (const id of ids) {
     const lead = db.leads.find((l) => l.id === id);
@@ -245,21 +258,24 @@ export async function bulkAssign(ids: string[], userId: string): Promise<void> {
   }
   saveDb();
   revalidatePath("/leads");
+  return {};
 }
 
-export async function bulkStatus(ids: string[], status: LeadStatus): Promise<void> {
-  const user = await getCurrentUser();
-  if (!leadStatusSchema.safeParse(status).success) return;
+export async function bulkStatus(ids: string[], status: LeadStatus): Promise<{ error?: string }> {
+  const user = await getWriterUser();
+  if (!user) return { error: WRITE_DENIED };
+  if (!leadStatusSchema.safeParse(status).success) return { error: "Status inválido." };
   for (const id of ids) setLeadStatus(id, status, user.id);
   revalidatePath("/leads");
   revalidatePath("/pipeline");
+  return {};
 }
 
-export async function bulkCampaign(ids: string[], campaignId: string): Promise<void> {
-  await getCurrentUser();
+export async function bulkCampaign(ids: string[], campaignId: string): Promise<{ error?: string }> {
+  if (!(await getWriterUser())) return { error: WRITE_DENIED };
   const db = getDb();
   // Sem esta checagem os leads apontavam para uma campanha inexistente.
-  if (!db.campaigns.some((c) => c.id === campaignId)) return;
+  if (!db.campaigns.some((c) => c.id === campaignId)) return { error: "Campanha não encontrada." };
   for (const id of ids) {
     const lead = db.leads.find((l) => l.id === id);
     if (lead) {
@@ -270,11 +286,13 @@ export async function bulkCampaign(ids: string[], campaignId: string): Promise<v
   saveDb();
   revalidatePath("/leads");
   revalidatePath("/campanhas");
+  return {};
 }
 
-export async function bulkAnalyze(ids: string[]): Promise<{ analyzed: number }> {
+export async function bulkAnalyze(ids: string[]): Promise<{ analyzed: number; error?: string }> {
   const db = getDb();
-  const user = await getCurrentUser();
+  const user = await getWriterUser();
+  if (!user) return { analyzed: 0, error: WRITE_DENIED };
   let analyzed = 0;
   for (const id of ids.slice(0, 25)) {
     const lead = db.leads.find((l) => l.id === id);
@@ -292,10 +310,11 @@ export async function bulkAnalyze(ids: string[]): Promise<{ analyzed: number }> 
   return { analyzed };
 }
 
-export async function bulkRescore(ids: string[]): Promise<void> {
-  await getCurrentUser();
+export async function bulkRescore(ids: string[]): Promise<{ error?: string }> {
+  if (!(await getWriterUser())) return { error: WRITE_DENIED };
   for (const id of ids) recomputeLeadScore(id);
   revalidatePath("/leads");
+  return {};
 }
 
 /* ---------------- Importação CSV ---------------- */
@@ -316,9 +335,10 @@ export interface CsvRow {
 
 export async function importCsvRows(
   rows: CsvRow[]
-): Promise<{ imported: number; duplicates: number; errors: number }> {
+): Promise<{ imported: number; duplicates: number; errors: number; denied?: string }> {
   const db = getDb();
-  const user = await getCurrentUser();
+  const user = await getWriterUser();
+  if (!user) return { imported: 0, duplicates: 0, errors: 0, denied: WRITE_DENIED };
   let imported = 0;
   let duplicates = 0;
   let errors = 0;

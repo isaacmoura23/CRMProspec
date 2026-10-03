@@ -77,7 +77,11 @@ export function PipelineKanban({
     if (!stage) return;
     setMoving(true);
     try {
-      await changeLeadStage(lead.id, stageId);
+      const res = await changeLeadStage(lead.id, stageId);
+      if (res.error) {
+        toast(res.error, "error");
+        return;
+      }
       toast(`${lead.company_name} movido para ${stage.name}.`);
       router.refresh();
     } catch {

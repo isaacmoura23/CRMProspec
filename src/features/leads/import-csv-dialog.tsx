@@ -150,6 +150,10 @@ export function ImportCsvDialog() {
         return obj as unknown as CsvRow;
       });
       const res = await importCsvRows(payload);
+      if (res.denied) {
+        toast(res.denied, "error");
+        return;
+      }
       setResult(res);
       setStep("done");
       router.refresh();

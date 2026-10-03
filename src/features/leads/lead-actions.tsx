@@ -100,7 +100,11 @@ export function LeadHeaderActions({ lead, users }: { lead: Lead; users: User[] }
       <Select
         value={lead.status}
         onValueChange={async (v) => {
-          await changeLeadStatus(lead.id, v as LeadStatus);
+          const res = await changeLeadStatus(lead.id, v as LeadStatus);
+          if (res.error) {
+            toast(res.error, "error");
+            return;
+          }
           toast(`Status alterado para ${STATUS_LABEL[v as LeadStatus]}.`);
           router.refresh();
         }}

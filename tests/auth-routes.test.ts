@@ -33,4 +33,18 @@ describe("destino pós-login (redirect aberto)", () => {
   it("recusa quebra de linha (injeção de cabeçalho no Location)", () => {
     assert.equal(safeNextPath("/ok\r\nSet-Cookie: a=b"), "/dashboard");
   });
+  it("recusa os caracteres que o parser de URL descarta", () => {
+    // O parser remove tab/CR/LF/controles antes de interpretar o endereço:
+    // "/\t/evil.com" vira "//evil.com" — outro domínio — se o guard olhar
+    // apenas o prefixo.
+    for (const bad of ["/\t/evil.com", "/\u000b/evil.com", "/\u000c/evil.com", "/\u0000/evil.com", "/ /evil.com"]) {
+      assert.equal(safeNextPath(bad), "/dashboard", JSON.stringify(bad));
+    }
+  });
+  it("o destino aceito nunca troca de origem", () => {
+    for (const raw of ["/\t/evil.com", "/carreira?aba=vagas", "//evil.com", "/leads/1", "/\\evil.com", "/ok#x"]) {
+      const destino = new URL(safeNextPath(raw), "https://app.exemplo.com/login");
+      assert.equal(destino.origin, "https://app.exemplo.com", `${JSON.stringify(raw)} -> ${destino.href}`);
+    }
+  });
 });

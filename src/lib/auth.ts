@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { getDb } from "@/lib/store";
 import { isSupabaseAuthConfigured, getAuthUser } from "@/lib/supabase-auth";
 import { ensureLeadsLoaded } from "@/services/lead-repository";
+import { canAdminister, canWrite } from "@/lib/permissions";
 import { loadAuthenticatedUser } from "@/services/user-repository";
 import type { User } from "@/types";
 
@@ -65,7 +66,7 @@ export async function getCurrentUser(): Promise<User> {
  */
 export async function getAdminUser(): Promise<User | null> {
   const user = await getCurrentUser();
-  return user.role === "owner" || user.role === "admin" ? user : null;
+  return canAdminister(user.role) ? user : null;
 }
 
 /** Sessão do modo demo. Não é usada quando o Supabase Auth está ativo. */
@@ -83,4 +84,16 @@ export async function setSessionUser(userId: string) {
 export async function clearSession() {
   const jar = await cookies();
   jar.delete(SESSION_COOKIE);
+}
+
+/**
+ * Usuário da sessão com permissão de escrita (tudo menos `viewer`).
+ *
+ * Devolve `null` para somente-leitura, para a action escolher a mensagem.
+ * Antes, qualquer sessão autenticada escrevia: com papéis reais vindos do
+ * banco, um `viewer` conseguia criar lead, mover etapa e apagar tarefa.
+ */
+export async function getWriterUser(): Promise<User | null> {
+  const user = await getCurrentUser();
+  return canWrite(user.role) ? user : null;
 }

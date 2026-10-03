@@ -2,6 +2,7 @@ import "server-only";
 import { detectWorkMode, findApplicationEmail, htmlToText } from "@/lib/job-text";
 import type { JobProvider, JobSearchQuery, RawJob } from "@/providers/jobs/types";
 import { RateLimitedError } from "@/providers/jobs/types";
+import { safeFetch } from "@/services/career/safe-fetch";
 
 /**
  * Adzuna — agregador com API documentada (https://developer.adzuna.com/).
@@ -87,13 +88,17 @@ export class AdzunaProvider implements JobProvider {
     return { jobs, hasMore: (data.count ?? 0) > page * perPage };
   }
 
+  /**
+   * Revalidação do anúncio pelo cliente com bloqueio de SSRF.
+   *
+   * A URL vem do provedor, mas pode ter sido atualizada por uma importação
+   * do usuário: um `fetch` cru aqui seguiria redirecionamentos para
+   * endereços internos sem nenhuma checagem.
+   */
   async checkAvailability(_externalId: string, url: string): Promise<boolean | null> {
-    try {
-      const res = await fetch(url, { method: "HEAD", redirect: "follow", signal: AbortSignal.timeout(8_000) });
-      if (res.status === 404 || res.status === 410) return false;
-      return res.ok ? true : null;
-    } catch {
-      return null;
-    }
+    const res = await safeFetch(url, { method: "HEAD", timeoutMs: 8_000 });
+    if (res.status === 404 || res.status === 410) return false;
+    if (res.ok) return true;
+    return null;
   }
 }

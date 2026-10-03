@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowUpDown,
@@ -31,7 +32,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ScoreBadge } from "@/components/score-badge";
 import { useToast } from "@/components/ui/toast";
-import { timeAgo, daysUntil } from "@/lib/format";
+import { timeAgo, daysUntil, plural } from "@/lib/format";
 import {
   bulkAnalyze,
   bulkArchive,
@@ -132,6 +133,13 @@ export function LeadsTable({
     setPending(true);
     try {
       const result = await fn();
+      // A action recusa a escrita (perfil somente leitura, dado inválido) no
+      // próprio retorno: sem isto a tela confirmava o que não aconteceu.
+      const error = result && typeof result === "object" && "error" in result ? (result as { error?: string }).error : undefined;
+      if (typeof error === "string") {
+        toast(error, "error");
+        return;
+      }
       toast(typeof message === "function" ? message(result) : message);
       setSelected(new Set());
       router.refresh();
@@ -167,7 +175,7 @@ export function LeadsTable({
           {selected.size > 0 ? (
             <span className="font-medium text-foreground">{selected.size} selecionados</span>
           ) : (
-            `${leads.length} leads`
+            plural(leads.length, "lead")
           )}
         </p>
         <div className="flex items-center gap-1.5">
@@ -231,7 +239,7 @@ export function LeadsTable({
                   onClick={() => {
                     if (
                       confirm(
-                        `Arquivar ${ids.length} leads? Eles saem das listagens, mas o histórico é mantido.`
+                        `Arquivar ${plural(ids.length, "lead")}? Eles saem das listagens, mas o histórico é mantido.`
                       )
                     ) {
                       run(() => bulkArchive(ids), "Leads arquivados.");
@@ -343,7 +351,16 @@ export function LeadsTable({
                     />
                   </TableCell>
                   <TableCell>
-                    <span className="block max-w-52 truncate text-[13px] font-medium">{lead.company_name}</span>
+                    {/* Link de verdade no nome: a linha inteira já abre o lead,
+                        mas só um <a> permite Ctrl/meio-clique para abrir em nova
+                        aba — abrir vários leads em paralelo é rotina aqui. */}
+                    <Link
+                      href={`/leads/${lead.id}`}
+                      onClick={(e) => e.stopPropagation()}
+                      className="block max-w-52 truncate text-[13px] font-medium hover:underline"
+                    >
+                      {lead.company_name}
+                    </Link>
                     {lead.contact_name && (
                       <span className="block text-xs text-muted-foreground">{lead.contact_name}</span>
                     )}

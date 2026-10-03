@@ -20,6 +20,10 @@ Module._resolveFilename = function (request, ...rest) {
   return orig.call(this, request, ...rest);
 };
 
+// A raiz real do projeto, para os testes que leem o código-fonte: o cwd
+// passa a ser um diretório temporário logo abaixo.
+process.env.CRM_ROOT = path.join(__dirname, "..");
+
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "crm-career-tests-"));
 process.chdir(tmp);
 process.env.NODE_ENV = "test";
