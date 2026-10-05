@@ -34,23 +34,34 @@ import { FILTER_LABEL, filterWarnings } from "@/services/lead-filter";
 import { cn } from "@/lib/utils";
 
 /**
- * O Text Search do Google devolve no máximo 60 lugares por busca, então
- * oferecer 100 era prometer o que a fonte real não entrega.
+ * O Text Search do Google devolve no máximo 60 lugares por busca.
+ * Outros providers (como o de demonstração) suportam mais.
  */
-const MAX_QUANTITY = 60;
-const QUANTITIES = [10, 25, 40, 60];
+/**
+ * Teto do formulário e da server action. Acima de 60 o provider precisa
+ * somar variações da consulta (mais chamadas cobradas e mais tempo), por
+ * isso o aviso ao lado dos números maiores.
+ */
+const MAX_QUANTITY = 200;
+const QUANTITIES = [25, 50, 100, 200];
 
-const CHARACTERISTICS: Array<{ key: string; label: string }> = [
-  { key: "hasPhone", label: "Possui telefone" },
-  { key: "hasWhatsapp", label: "Possui WhatsApp" },
-  { key: "hasInstagram", label: "Possui Instagram" },
-  { key: "hasEmail", label: "Possui e-mail" },
-  { key: "noWebsite", label: "Sem site" },
-  { key: "hasWebsite", label: "Possui site" },
-  { key: "badWebsite", label: "Site potencialmente ruim" },
-  { key: "activeBusiness", label: "Empresa ativa" },
-  { key: "hasReviews", label: "Empresa com avaliações" },
-  { key: "strongSocial", label: "Presença forte em redes sociais" },
+/**
+ * Cada critério diz de onde vem o dado: Instagram, WhatsApp e e-mail são
+ * descobertos visitando o site da empresa, então combiná-los com "Sem site"
+ * quase sempre devolve lista vazia. Dizer isso no rótulo evita a espera
+ * inútil.
+ */
+const CHARACTERISTICS: Array<{ key: string; label: string; hint: string }> = [
+  { key: "hasPhone", label: "Possui telefone", hint: "Vem do Google — quase toda empresa tem." },
+  { key: "hasWhatsapp", label: "Possui WhatsApp", hint: "Encontrado no site da empresa." },
+  { key: "hasInstagram", label: "Possui Instagram", hint: "Encontrado no site da empresa." },
+  { key: "hasEmail", label: "Possui e-mail", hint: "Só o do domínio da empresa; raro, cerca de metade dos que têm site." },
+  { key: "noWebsite", label: "Sem site", hint: "Oportunidade clássica, mas rara em alguns nichos (imobiliárias, clínicas)." },
+  { key: "hasWebsite", label: "Possui site", hint: "Não combina com “Sem site”." },
+  { key: "badWebsite", label: "Site potencialmente ruim", hint: "Site que não abre bem no celular ou parece antigo." },
+  { key: "activeBusiness", label: "Empresa ativa", hint: "Exclui as que o Google marca como fechadas." },
+  { key: "hasReviews", label: "Empresa com avaliações", hint: "Tem ao menos uma avaliação no Google." },
+  { key: "strongSocial", label: "Presença forte em redes sociais", hint: "Instagram ativo — depende de achar o perfil pelo site." },
 ];
 
 export function ProspectForm({
@@ -291,6 +302,13 @@ export function ProspectForm({
                 )}
               </div>
             </div>
+            {quantity > 60 && (
+              <p className="mt-2 text-[12px] text-muted-foreground">
+                Acima de 60 o sistema combina variações da busca (ex.: “imobiliária”,
+                “corretora de imóveis”, “administradora de imóveis”) para somar empresas
+                diferentes. Leva mais tempo e consome mais chamadas da sua cota do Google.
+              </p>
+            )}
           </CardContent>
         </Card>
 
@@ -304,15 +322,19 @@ export function ProspectForm({
               {CHARACTERISTICS.map((c) => (
                 <label
                   key={c.key}
-                  className="flex cursor-pointer items-center gap-2.5 rounded-lg border border-border px-3 py-2.5 transition-colors hover:border-border-strong has-[[data-state=checked]]:border-primary/50 has-[[data-state=checked]]:bg-primary-soft/40"
+                  className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-border px-3 py-2.5 transition-colors hover:border-border-strong has-[[data-state=checked]]:border-primary/50 has-[[data-state=checked]]:bg-primary-soft/40"
                 >
                   <Checkbox
+                    className="mt-0.5"
                     checked={Boolean(filters[c.key])}
                     onCheckedChange={(v) =>
                       setFilters((f) => ({ ...f, [c.key]: v === true }))
                     }
                   />
-                  <span className="text-[13px]">{c.label}</span>
+                  <span className="min-w-0">
+                    <span className="block text-[13px]">{c.label}</span>
+                    <span className="block text-[11px] leading-tight text-muted-foreground">{c.hint}</span>
+                  </span>
                 </label>
               ))}
             </div>
@@ -483,9 +505,24 @@ function JobProgress({
           )}
 
           {job.status === "completed" && (
-            <div className="rounded-lg bg-primary-soft px-4 py-3 text-sm text-primary-soft-fg">
-              <span className="font-semibold">{job.found_lead_ids.length} novos leads</span> salvos,
-              analisados e pontuados.
+            // Zero leads não é sucesso: com o mesmo visual verde de "deu
+            // certo", a pessoa ia para a lista de leads e concluía que o
+            // sistema tinha ignorado os filtros.
+            <div
+              className={
+                job.found_lead_ids.length === 0
+                  ? "rounded-lg border border-warning/30 bg-warning-soft px-4 py-3 text-sm text-warning"
+                  : "rounded-lg bg-primary-soft px-4 py-3 text-sm text-primary-soft-fg"
+              }
+            >
+              {job.found_lead_ids.length === 0 ? (
+                <span className="font-semibold">Nenhum lead foi salvo nesta busca.</span>
+              ) : (
+                <>
+                  <span className="font-semibold">{job.found_lead_ids.length} novos leads</span> salvos,
+                  analisados e pontuados.
+                </>
+              )}
               {job.duplicates > 0 && ` ${job.duplicates} duplicados foram ignorados.`}
               {(job.filtered ?? 0) > 0 &&
                 ` ${job.filtered} empresas fora do perfil escolhido foram descartadas.`}

@@ -408,3 +408,39 @@ export async function exportLeadsCsv(ids: string[]): Promise<string> {
   );
   return [header.join(";"), ...lines].join("\n");
 }
+
+/* ---------------- Dados de demonstração ---------------- */
+
+/**
+ * Remove os leads de demonstração e tudo que pende deles.
+ *
+ * O seed existe para a primeira visita não ser uma tela vazia, mas os leads
+ * fictícios têm score alto (média 70, contra 41 dos reais) e, como a lista
+ * ordena por score, ocupam o topo para sempre: dá a impressão de que toda
+ * busca devolve "as mesmas empresas". Depois da primeira prospecção de
+ * verdade eles só atrapalham.
+ */
+export async function removeDemoLeads(): Promise<{ removed: number; error?: string }> {
+  if (!(await getWriterUser())) return { removed: 0, error: WRITE_DENIED };
+  const db = getDb();
+  const demoIds = new Set(db.leads.filter((l) => l.source === "demo").map((l) => l.id));
+  if (demoIds.size === 0) return { removed: 0 };
+
+  db.leads = db.leads.filter((l) => !demoIds.has(l.id));
+  db.lead_analysis = db.lead_analysis.filter((a) => !demoIds.has(a.lead_id));
+  db.lead_score_history = db.lead_score_history.filter((h) => !demoIds.has(h.lead_id));
+  db.activities = db.activities.filter((a) => !demoIds.has(a.lead_id));
+  db.notes = db.notes.filter((n) => !demoIds.has(n.lead_id));
+  db.tasks = db.tasks.filter((t) => !t.lead_id || !demoIds.has(t.lead_id));
+  db.proposals = db.proposals.filter((p) => !demoIds.has(p.lead_id));
+  db.ai_generations = db.ai_generations.filter((g) => !demoIds.has(g.lead_id));
+  const convIds = new Set(db.conversations.filter((c) => demoIds.has(c.lead_id)).map((c) => c.id));
+  db.conversations = db.conversations.filter((c) => !demoIds.has(c.lead_id));
+  db.messages = db.messages.filter((m) => !convIds.has(m.conversation_id));
+  saveDb();
+
+  for (const caminho of ["/leads", "/dashboard", "/pipeline", "/conversas", "/tarefas", "/propostas", "/relatorios", "/analises"]) {
+    revalidatePath(caminho);
+  }
+  return { removed: demoIds.size };
+}

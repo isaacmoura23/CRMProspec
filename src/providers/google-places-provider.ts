@@ -13,9 +13,17 @@ import { extractInstagramHandle, extractWhatsapp } from "@/services/enrichment";
  */
 
 const PAGE_SIZE = 20;
-const MAX_RESULTS = 60; // limite do Text Search com paginação
+/**
+ * Teto por consulta: o Text Search pagina 3 vezes, 20 por página.
+ * Para passar disso, o jeito é mudar a consulta — cada variação do nicho
+ * ("imobiliária", "corretora de imóveis", "administradora de imóveis") tem
+ * o seu próprio teto de 60, e os resultados se somam depois do dedupe.
+ */
+const MAX_PER_QUERY = 60;
+/** Teto total de uma prospecção: 4 variações aproveitáveis × 60. */
+const MAX_RESULTS = 240;
 /** Teto de variações de consulta por busca — cada uma é uma chamada cobrada. */
-const MAX_QUERY_VARIANTS = 4;
+const MAX_QUERY_VARIANTS = 5;
 
 /** Nicho da UI → tipos do Google Places aceitos (validação do resultado) */
 const NICHE_TYPES: Record<string, { includedType?: string; accept: string[] }> = {
@@ -177,6 +185,8 @@ export class GooglePlacesProvider implements LeadProvider {
     for (const currentQuery of queries.slice(0, MAX_QUERY_VARIANTS)) {
       if (places.length >= wanted) break;
       let pageToken: string | undefined;
+      const antesDestaConsulta = places.length;
+      const placesNestaConsulta = () => places.length - antesDestaConsulta;
 
       do {
         const res = await fetch("https://places.googleapis.com/v1/places:searchText", {
@@ -228,7 +238,9 @@ export class GooglePlacesProvider implements LeadProvider {
           places.push(p);
         }
         pageToken = data.nextPageToken;
-      } while (pageToken && places.length < wanted);
+        // Cada variação esgota em 60 (3 páginas); além disso, só mudando a
+        // consulta. O corte por `wanted` evita chamadas cobradas à toa.
+      } while (pageToken && places.length < wanted && placesNestaConsulta() < MAX_PER_QUERY);
     }
 
     if (places.length === 0 && firstCallFailed) throw new Error(firstCallFailed);

@@ -6,7 +6,7 @@ import { plural } from "@/lib/format";
 import { getActiveProvider } from "@/providers/registry";
 import { findDuplicate } from "@/services/dedupe";
 import { enrichBatch } from "@/services/enrichment";
-import { hasActiveFilters, matchesFilters, rejectionReasons } from "@/services/lead-filter";
+import { hasActiveFilters, hasRareFilters, matchesFilters, rejectionReasons } from "@/services/lead-filter";
 import { createLeadFromRaw, logActivity } from "@/services/lead-service";
 import { aiAnalyzeLead } from "@/ai";
 import type { JobStep, Lead, ProspectingJob, SearchParams } from "@/types";
@@ -104,13 +104,15 @@ async function runProspectingJob(jobId: string, userId: string): Promise<void> {
        duplicados e empresas descartadas pelos filtros */
     const provider = getActiveProvider();
     const filters = job.params.filters;
-    const overfetch = hasActiveFilters(filters) ? 3 : 1.5;
+    const overfetch = hasRareFilters(filters) ? 8 : hasActiveFilters(filters) ? 3 : 1.5;
+    const teto = provider.id === "google_places" ? 60 : 120;
     // O excedente vale para qualquer fonte: sem ele o provider de diretório
     // entrega exatamente `quantity` e o que cair em dedupe/filtro vira falta.
-    const fetchTarget = Math.min(
-      provider.id === "google_places" ? 60 : 120,
-      Math.max(job.params.quantity + 5, Math.ceil(job.params.quantity * overfetch))
-    );
+    // Com critério raro (ex.: "sem site"), vale varrer até o teto da fonte:
+    // é a diferença entre voltar vazio e achar as poucas que atendem.
+    const fetchTarget = hasRareFilters(filters)
+      ? teto
+      : Math.min(teto, Math.max(job.params.quantity + 5, Math.ceil(job.params.quantity * overfetch)));
 
     // nunca repetir empresas de buscas anteriores, mesmo que os leads tenham sido removidos
     db.seen_source_ids ??= [];
@@ -130,8 +132,8 @@ async function runProspectingJob(jobId: string, userId: string): Promise<void> {
     });
 
     const finding = step("finding");
-    finding.done = raws.length;
-    finding.total = Math.max(raws.length, 1);
+    finding.done = Math.min(raws.length, job.params.quantity);
+    finding.total = job.params.quantity;
     finding.status = "completed";
 
     /* 2. Deduplicação contra a base existente */
@@ -147,14 +149,15 @@ async function runProspectingJob(jobId: string, userId: string): Promise<void> {
     });
 
     const enriching = step("enriching");
-    enriching.total = candidates.length;
+    const targetEnrich = Math.min(candidates.length, job.params.quantity);
+    enriching.total = targetEnrich;
     enriching.status = candidates.length > 0 ? "processing" : "completed";
     saveDb();
 
     /* 3. Enriquecimento real: visita o site e extrai Instagram, e-mail,
        WhatsApp, qualidade do site e sinais de marketing */
     const enriched = await enrichBatch(candidates, (done) => {
-      enriching.done = done;
+      enriching.done = candidates.length > 0 ? Math.round((done / candidates.length) * targetEnrich) : 0;
       saveDb();
     });
     enriching.status = "completed";

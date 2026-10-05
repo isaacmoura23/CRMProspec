@@ -13,8 +13,9 @@ const searchSchema = z.object({
   state: z.string().max(60).optional(),
   city: z.string().min(2).max(80),
   region: z.string().max(80).optional(),
-  // Teto igual ao do Text Search do Google, a fonte real.
-  quantity: z.number().int().min(1).max(60),
+  // O Text Search entrega 60 por consulta; acima disso o provider soma as
+  // variações do nicho. 200 é o teto do formulário.
+  quantity: z.number().int().min(1).max(200),
   campaignName: z.string().max(80).optional(),
   filters: z.object({
     hasPhone: z.boolean().optional(),

@@ -105,6 +105,18 @@ export function matchesFilters(raw: RawLead, f: SearchParams["filters"]): boolea
   return true;
 }
 
+/**
+ * Critérios que poucas empresas atendem — e que por isso exigem varrer bem
+ * mais resultados antes de desistir.
+ *
+ * "Sem site" é o caso extremo: numa busca de imobiliárias em São Paulo, as
+ * 30 empresas trazidas pelo Google tinham site, e o pedido terminou em zero
+ * sem nunca ter chegado perto do teto de 60 que a fonte permite.
+ */
+export function hasRareFilters(f: SearchParams["filters"]): boolean {
+  return Boolean(f.noWebsite || f.badWebsite || f.hasEmail || f.strongSocial);
+}
+
 export function hasActiveFilters(f: SearchParams["filters"]): boolean {
   return Object.values(f).some(Boolean);
 }

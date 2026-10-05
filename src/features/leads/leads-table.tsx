@@ -11,6 +11,8 @@ import {
   Download,
   Gauge,
   Globe,
+  Mail,
+  MessageCircle,
   Loader2,
   Megaphone,
   Phone,
@@ -381,7 +383,7 @@ export function LeadsTable({
                       <span className="flex items-center gap-1.5">
                         {lead.website ? (
                           <a
-                            href={lead.website}
+                            href={lead.website.startsWith("http") ? lead.website : `https://${lead.website}`}
                             target="_blank"
                             rel="noreferrer"
                             title={lead.website}
@@ -413,17 +415,51 @@ export function LeadsTable({
                             <AtSign className="size-3.5" />
                           </span>
                         )}
-                        {lead.phone || lead.whatsapp ? (
-                          <span
-                            title={lead.whatsapp ?? lead.phone ?? ""}
-                            aria-label={`Telefone: ${lead.whatsapp ?? lead.phone}`}
-                            className="text-muted-foreground"
+                        {/* WhatsApp tem ícone próprio: antes dividia o do
+                            telefone, então um lead sem Instagram parecia não
+                            ter canal de contato nenhum. */}
+                        {lead.whatsapp ? (
+                          <a
+                            href={`https://wa.me/${lead.whatsapp.replace(/\D/g, "")}`}
+                            title={`WhatsApp: ${lead.whatsapp}`}
+                            aria-label={`WhatsApp: ${lead.whatsapp}`}
+                            className="text-muted-foreground hover:text-primary"
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            <MessageCircle className="size-3.5" />
+                          </a>
+                        ) : (
+                          <span title="Sem WhatsApp" aria-label="Sem WhatsApp" className="text-border-strong">
+                            <MessageCircle className="size-3.5" />
+                          </span>
+                        )}
+                        {lead.phone ? (
+                          <a
+                            href={`tel:${lead.phone.replace(/\D/g, "")}`}
+                            title={`Telefone: ${lead.phone}`}
+                            aria-label={`Telefone: ${lead.phone}`}
+                            className="text-muted-foreground hover:text-primary"
                           >
                             <Phone className="size-3.5" />
-                          </span>
+                          </a>
                         ) : (
                           <span title="Sem telefone" aria-label="Sem telefone" className="text-border-strong">
                             <Phone className="size-3.5" />
+                          </span>
+                        )}
+                        {lead.email ? (
+                          <a
+                            href={`mailto:${lead.email}`}
+                            title={`E-mail: ${lead.email}`}
+                            aria-label={`E-mail: ${lead.email}`}
+                            className="text-muted-foreground hover:text-primary"
+                          >
+                            <Mail className="size-3.5" />
+                          </a>
+                        ) : (
+                          <span title="Sem e-mail" aria-label="Sem e-mail" className="text-border-strong">
+                            <Mail className="size-3.5" />
                           </span>
                         )}
                       </span>
