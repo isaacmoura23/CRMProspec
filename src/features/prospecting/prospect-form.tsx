@@ -30,6 +30,7 @@ import { Progress } from "@/components/ui/progress";
 import { getProspectingJob, startProspecting } from "@/actions/prospecting";
 import type { JobStep, ProspectingJob } from "@/types";
 import { NICHES } from "@/providers/directory-data";
+import { FILTER_LABEL, filterWarnings } from "@/services/lead-filter";
 import { cn } from "@/lib/utils";
 
 /**
@@ -79,6 +80,9 @@ export function ProspectForm({
   const [lostJob, setLostJob] = React.useState(false);
 
   const running = job && !lostJob && (job.status === "queued" || job.status === "processing");
+  // Combinações que quase sempre voltam vazias — avisadas antes da espera,
+  // não depois. Ver services/lead-filter.ts para o porquê de cada uma.
+  const avisosDeFiltro = filterWarnings(filters);
 
   // polling do job em execução — progresso real, nunca simulado.
   // Se o job sumir (a execução que o criou foi encerrada) ou o polling
@@ -312,6 +316,16 @@ export function ProspectForm({
                 </label>
               ))}
             </div>
+            {avisosDeFiltro.length > 0 && (
+              <div className="mt-3 space-y-1.5" role="status">
+                {avisosDeFiltro.map((aviso, i) => (
+                  <p key={i} className="flex items-start gap-2 rounded-lg bg-warning-soft px-3 py-2 text-[13px] text-warning">
+                    <AlertCircle className="mt-0.5 size-4 shrink-0" />
+                    {aviso}
+                  </p>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -480,8 +494,28 @@ function JobProgress({
                 // Distingue "acabaram as empresas novas aqui" de "os filtros
                 // são restritivos demais" — a saída para cada caso é outra.
                 ((job.filtered ?? 0) > job.duplicates
-                  ? " Faltou completar o pedido porque muitas empresas não passaram nos filtros — tente afrouxar algum critério."
+                  ? " Faltou completar o pedido porque muitas empresas não passaram nos filtros."
                   : ` Já prospectamos praticamente todas as empresas de ${job.params.niche} em ${job.params.city}. Tente outra cidade ou outro nicho.`)}
+
+              {/* Qual critério derrubou quantas: com vários filtros marcados,
+                  "afrouxe algum" não diz qual. */}
+              {job.filtered_by && Object.keys(job.filtered_by).length > 0 && (
+                <div className="mt-2.5 border-t border-primary/20 pt-2.5">
+                  <p className="text-[12px] font-medium">Descartes por critério:</p>
+                  <ul className="mt-1 space-y-0.5">
+                    {Object.entries(job.filtered_by)
+                      .sort((a, b) => b[1] - a[1])
+                      .map(([chave, n]) => (
+                        <li key={chave} className="text-[12px]">
+                          {FILTER_LABEL[chave] ?? chave}: <span className="font-semibold tabular-nums">{n}</span> empresa(s)
+                        </li>
+                      ))}
+                  </ul>
+                  <p className="mt-1.5 text-[12px]">
+                    Desmarque o critério do topo da lista para a próxima busca render mais.
+                  </p>
+                </div>
+              )}
             </div>
           )}
 

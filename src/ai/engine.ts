@@ -186,6 +186,44 @@ function pickProblem(lead: Lead): ProblemTemplate {
   }
 }
 
+/**
+ * Abertura com os dados reais daquela empresa.
+ *
+ * Os templates de problema são por tipo de nicho e situação do site, então
+ * duas clínicas sem site recebiam o mesmo texto, palavra por palavra — o
+ * diagnóstico estava certo, mas parecia carimbo e não dizia nada sobre
+ * aquele negócio. Aqui entram só campos que existem no lead; nada é
+ * inventado, e quando não há dado nenhum a frase é omitida.
+ */
+function evidenceOpening(lead: Lead): string | null {
+  const nome = lead.company_name.trim();
+  const reputacao =
+    (lead.reviews_count ?? 0) > 0
+      ? `${lead.reviews_count} avaliações no Google${lead.rating ? ` (nota ${lead.rating})` : ""}`
+      : null;
+  const social = lead.instagram
+    ? `Instagram ${lead.instagram_active ? "ativo" : "pouco movimentado"} em ${lead.instagram}`
+    : null;
+  const canal = lead.whatsapp ? "atendimento por WhatsApp" : lead.phone ? "atendimento por telefone" : null;
+  // Só a cidade: o endereço completo do Google (com sala, andar e CEP) fica
+  // ilegível no meio da frase, e já aparece na ficha do lead.
+  const onde = lead.city?.trim() || null;
+
+  const sinais = [reputacao, social, canal].filter(Boolean) as string[];
+  if (sinais.length === 0) return null;
+  const lista =
+    sinais.length === 1 ? sinais[0]! : `${sinais.slice(0, -1).join(", ")} e ${sinais[sinais.length - 1]}`;
+
+  // A forma muda conforme o lead, para a lista não virar um molde repetido.
+  const chave = [...lead.id].reduce((acc, c) => acc + c.charCodeAt(0), 0);
+  const formas = [
+    `${nome}${onde ? `, em ${onde},` : ""} tem ${lista}.`,
+    `Hoje a ${nome} já conta com ${lista}${onde ? `, atendendo em ${onde}` : ""}.`,
+    `${nome}${onde ? ` (${onde})` : ""}: ${lista}.`,
+  ];
+  return formas[chave % formas.length]!;
+}
+
 export function engineAnalyze(lead: Lead): AnalysisOutput {
   const t = pickProblem(lead);
   const strengths: string[] = [];
@@ -216,10 +254,14 @@ export function engineAnalyze(lead: Lead): AnalysisOutput {
   if (!lead.description) confidence -= 6;
   if (nicheKind(lead.segment) === "generico") confidence -= 8;
 
+  // O template diz o problema do tipo de negócio; a abertura ancora o
+  // diagnóstico nesta empresa específica.
+  const abertura = evidenceOpening(lead);
+
   return {
     digital_presence_summary: `${presenceParts.join(", ")}.`.replace(/^./, (c) => c.toUpperCase()),
     strengths: strengths.slice(0, 4),
-    main_problem: t.problem,
+    main_problem: abertura ? `${abertura} ${t.problem}` : t.problem,
     problem_impact: t.impact,
     recommended_solution: t.solution,
     commercial_angle: t.angle,

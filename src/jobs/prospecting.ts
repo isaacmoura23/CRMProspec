@@ -2,10 +2,11 @@ import "server-only";
 import { after } from "next/server";
 import { getDb, nowIso, saveDb } from "@/lib/store";
 import { uid } from "@/lib/utils";
+import { plural } from "@/lib/format";
 import { getActiveProvider } from "@/providers/registry";
 import { findDuplicate } from "@/services/dedupe";
 import { enrichBatch } from "@/services/enrichment";
-import { hasActiveFilters, matchesFilters } from "@/services/lead-filter";
+import { hasActiveFilters, matchesFilters, rejectionReasons } from "@/services/lead-filter";
 import { createLeadFromRaw, logActivity } from "@/services/lead-service";
 import { aiAnalyzeLead } from "@/ai";
 import type { JobStep, Lead, ProspectingJob, SearchParams } from "@/types";
@@ -162,6 +163,12 @@ async function runProspectingJob(jobId: string, userId: string): Promise<void> {
        enriquecimento, quando os dados realmente existem */
     const matched = enriched.filter((raw) => matchesFilters(raw, filters));
     job.filtered = enriched.length - matched.length;
+    // Conta por critério: "30 descartadas" não diz o que afrouxar.
+    const porFiltro: Record<string, number> = {};
+    for (const raw of enriched) {
+      for (const motivo of rejectionReasons(raw, filters)) porFiltro[motivo] = (porFiltro[motivo] ?? 0) + 1;
+    }
+    job.filtered_by = porFiltro;
     const selected = matched.slice(0, job.params.quantity);
 
     const analyzing = step("analyzing");
@@ -212,7 +219,7 @@ async function runProspectingJob(jobId: string, userId: string): Promise<void> {
       id: uid("ntf"),
       organization_id: db.organization.id,
       user_id: userId,
-      title: `Prospecção concluída: ${job.found_lead_ids.length} leads encontrados`,
+      title: `Prospecção concluída: ${plural(job.found_lead_ids.length, "lead encontrado", "leads encontrados")}`,
       body: notes.length > 0 ? `${notes.join(" · ")}.` : null,
       link: `/leads`,
       read: false,

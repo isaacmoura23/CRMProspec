@@ -139,17 +139,73 @@ export function extractWhatsapp(text: string): string | null {
   return m ? `+${m[1]}` : null;
 }
 
-function extractEmail(text: string): string | null {
-  const mailto = /mailto:([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})/.exec(text);
-  const candidate =
-    mailto?.[1] ??
-    /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/.exec(text)?.[0] ??
-    null;
-  if (!candidate) return null;
-  const lower = candidate.toLowerCase();
-  if (/\.(png|jpe?g|gif|svg|webp|css|js)$/.test(lower)) return null;
-  if (/(example\.|sentry|wixpress|schema\.org|w3\.org)/.test(lower)) return null;
-  return lower;
+/** Provedores de e-mail pessoais/gratuitos: conta da própria empresa, não de fornecedor. */
+const PROVEDORES_PUBLICOS = new Set([
+  "gmail.com", "googlemail.com", "hotmail.com", "hotmail.com.br", "outlook.com", "outlook.com.br",
+  "live.com", "msn.com", "yahoo.com", "yahoo.com.br", "icloud.com", "me.com", "uol.com.br",
+  "bol.com.br", "terra.com.br", "ig.com.br", "globo.com", "sapo.pt", "clix.pt",
+]);
+
+/** Caixas que existem por obrigação legal/técnica e não atendem prospecção. */
+const CAIXAS_IGNORADAS = /^(no-?reply|nao-?responda|postmaster|webmaster|abuse|dpo|privacidade|privacy|suporte@wix|admin@wordpress)/i;
+
+function dominioDe(url: string | undefined): string | null {
+  if (!url) return null;
+  try {
+    return new URL(url).hostname.toLowerCase().replace(/^www\./, "");
+  } catch {
+    return null;
+  }
+}
+
+/** `contato@imob.com.br` combina com o site `imob.com.br` (e com seus subdomínios). */
+function mesmoDominio(email: string, site: string): boolean {
+  const d = email.split("@")[1] ?? "";
+  return d === site || d.endsWith(`.${site}`) || site.endsWith(`.${d}`);
+}
+
+/**
+ * Escolhe o e-mail de contato DA EMPRESA dentro do HTML do site.
+ *
+ * Pegar o primeiro e-mail que aparece é o que fazia esta função antes — e o
+ * primeiro costuma ser o do rodapé "desenvolvido por…". Numa base real de 84
+ * imobiliárias, o mesmo endereço de uma agência de sites foi gravado como
+ * contato de cinco empresas diferentes: uma campanha escreveria para o
+ * fornecedor, não para o cliente.
+ *
+ * Ordem de preferência:
+ *   1. e-mail do mesmo domínio do site (é a empresa);
+ *   2. e-mail em provedor público (a empresa usando Gmail/Hotmail);
+ *   3. nenhum — um endereço de outro domínio corporativo é de terceiro.
+ */
+export function pickEmail(html: string, websiteUrl?: string): string | null {
+  const site = dominioDe(websiteUrl);
+  const encontrados: string[] = [];
+
+  const push = (valor: string | undefined) => {
+    if (!valor) return;
+    const lower = valor.toLowerCase();
+    if (/\.(png|jpe?g|gif|svg|webp|css|js)$/.test(lower)) return;
+    if (/(example\.|sentry|wixpress|schema\.org|w3\.org|\.wixpress|godaddy|hostgator)/.test(lower)) return;
+    if (CAIXAS_IGNORADAS.test(lower)) return;
+    if (!encontrados.includes(lower)) encontrados.push(lower);
+  };
+
+  // `mailto:` primeiro: é um endereço que o site publicou para contato.
+  for (const m of html.matchAll(/mailto:([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})/gi)) push(m[1]);
+  for (const m of html.matchAll(/[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/g)) push(m[0]);
+  if (encontrados.length === 0) return null;
+
+  if (site) {
+    const proprio = encontrados.find((e) => mesmoDominio(e, site));
+    if (proprio) return proprio;
+  }
+  const publico = encontrados.find((e) => PROVEDORES_PUBLICOS.has(e.split("@")[1] ?? ""));
+  if (publico) return publico;
+
+  // Sobrou só endereço de outro domínio: é de terceiro (agência, plataforma,
+  // portal). Melhor não ter e-mail do que ter o e-mail errado.
+  return null;
 }
 
 /** Número de celular BR/PT — forte indício de WhatsApp comercial */
@@ -226,7 +282,7 @@ export async function enrichRawLead(raw: RawLead): Promise<RawLead> {
     }
     if (!out.facebook) out.facebook = extractFacebook(html) ?? undefined;
     if (!out.whatsapp) out.whatsapp = extractWhatsapp(html) ?? undefined;
-    if (!out.email) out.email = extractEmail(html) ?? undefined;
+    if (!out.email) out.email = pickEmail(html, out.website) ?? undefined;
     if (!out.marketing_signals) {
       out.marketing_signals = /(googletagmanager|gtag\(|fbq\(|pixel|hotjar|clarity\.ms|mailchimp|rdstation)/i.test(html);
     }

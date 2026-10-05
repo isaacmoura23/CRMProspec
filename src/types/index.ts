@@ -439,6 +439,8 @@ export interface ProspectingJob {
   duplicates: number;
   /** Empresas descartadas por não atenderem aos filtros escolhidos */
   filtered?: number;
+  /** Quantas empresas cada filtro derrubou — orienta qual critério afrouxar. */
+  filtered_by?: Record<string, number>;
   errors: string[];
   campaign_id: string | null;
   created_at: string;
