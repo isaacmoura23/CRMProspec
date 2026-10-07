@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "prospecatlas": {
+      "command": "npx",
+      "args": ["tsx", "--require", "./mcp/runtime.cjs", "./mcp/server.ts"]
+    }
+  }
+}

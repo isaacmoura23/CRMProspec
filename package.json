@@ -8,9 +8,12 @@
     "start": "next start",
     "lint": "eslint",
     "test": "node tests/run.cjs",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "mcp": "tsx --require ./mcp/runtime.cjs ./mcp/server.ts",
+    "mcp:smoke": "tsx ./mcp/smoke.ts"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "@radix-ui/react-avatar": "^1.2.6",
     "@radix-ui/react-checkbox": "^1.3.11",
     "@radix-ui/react-dialog": "^1.1.23",
