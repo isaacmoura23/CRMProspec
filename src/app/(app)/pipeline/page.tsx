@@ -4,13 +4,16 @@ import { PageHeader } from "@/components/page-header";
 import { PipelineKanban, type KanbanLead } from "@/features/pipeline/kanban";
 import { buildNextAction } from "@/features/leads/next-action";
 import { formatCurrency } from "@/lib/format";
+import { visibleLeads } from "@/services/lead-visibility";
 
 export const metadata: Metadata = { title: "Pipeline" };
 export const dynamic = "force-dynamic";
 
 export default function PipelinePage() {
   const db = getDb();
-  const leads: KanbanLead[] = db.leads
+  // Mesmo critério da lista de leads: os de demonstração só aparecem
+  // enquanto não houver nenhum lead real.
+  const leads: KanbanLead[] = visibleLeads(db.leads)
     .filter((l) => !l.archived)
     .map((lead) => ({
       ...lead,

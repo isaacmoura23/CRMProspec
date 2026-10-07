@@ -104,15 +104,18 @@ async function runProspectingJob(jobId: string, userId: string): Promise<void> {
        duplicados e empresas descartadas pelos filtros */
     const provider = getActiveProvider();
     const filters = job.params.filters;
-    const overfetch = hasRareFilters(filters) ? 8 : hasActiveFilters(filters) ? 3 : 1.5;
-    const teto = provider.id === "google_places" ? 60 : 120;
+    const overfetch = hasRareFilters(filters) ? 12 : hasActiveFilters(filters) ? 3 : 1.5;
+    // O Google entrega 60 por consulta, mas o provider soma as variações do
+    // nicho e chega a 240. Com critério raro vale usar essa folga: pedir 10
+    // empresas "sem site" em São Paulo varria 60 e achava 6, porque só 1 em
+    // cada 10 imobiliárias não tem site.
+    const teto = provider.id === "google_places" ? 240 : 120;
     // O excedente vale para qualquer fonte: sem ele o provider de diretório
     // entrega exatamente `quantity` e o que cair em dedupe/filtro vira falta.
-    // Com critério raro (ex.: "sem site"), vale varrer até o teto da fonte:
-    // é a diferença entre voltar vazio e achar as poucas que atendem.
-    const fetchTarget = hasRareFilters(filters)
-      ? teto
-      : Math.min(teto, Math.max(job.params.quantity + 5, Math.ceil(job.params.quantity * overfetch)));
+    const fetchTarget = Math.min(
+      teto,
+      Math.max(job.params.quantity + 5, Math.ceil(job.params.quantity * overfetch))
+    );
 
     // nunca repetir empresas de buscas anteriores, mesmo que os leads tenham sido removidos
     db.seen_source_ids ??= [];
@@ -132,8 +135,11 @@ async function runProspectingJob(jobId: string, userId: string): Promise<void> {
     });
 
     const finding = step("finding");
-    finding.done = Math.min(raws.length, job.params.quantity);
-    finding.total = job.params.quantity;
+    // Os contadores mostram o que realmente aconteceu. Antes eram escalados
+    // para a quantidade pedida — a tela dizia "10/10" depois de varrer 60, e
+    // isso contradizia o próprio relatório final ("54 descartados").
+    finding.done = raws.length;
+    finding.total = Math.max(raws.length, 1);
     finding.status = "completed";
 
     /* 2. Deduplicação contra a base existente */
@@ -149,15 +155,14 @@ async function runProspectingJob(jobId: string, userId: string): Promise<void> {
     });
 
     const enriching = step("enriching");
-    const targetEnrich = Math.min(candidates.length, job.params.quantity);
-    enriching.total = targetEnrich;
+    enriching.total = candidates.length;
     enriching.status = candidates.length > 0 ? "processing" : "completed";
     saveDb();
 
     /* 3. Enriquecimento real: visita o site e extrai Instagram, e-mail,
        WhatsApp, qualidade do site e sinais de marketing */
     const enriched = await enrichBatch(candidates, (done) => {
-      enriching.done = candidates.length > 0 ? Math.round((done / candidates.length) * targetEnrich) : 0;
+      enriching.done = done;
       saveDb();
     });
     enriching.status = "completed";
@@ -173,6 +178,10 @@ async function runProspectingJob(jobId: string, userId: string): Promise<void> {
     }
     job.filtered_by = porFiltro;
     const selected = matched.slice(0, job.params.quantity);
+    // Guarda quantas empresas a fonte chegou a oferecer: é o que distingue
+    // "os filtros são estreitos" de "a fonte acabou".
+    job.scanned = raws.length;
+    job.fetch_target = fetchTarget;
 
     const analyzing = step("analyzing");
     const scoring = step("scoring");

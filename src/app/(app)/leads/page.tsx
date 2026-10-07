@@ -11,6 +11,7 @@ import { ImportCsvDialog } from "@/features/leads/import-csv-dialog";
 import { DemoDataNotice } from "@/features/leads/demo-data-notice";
 import { buildNextAction } from "@/features/leads/next-action";
 import { STATUS_LABEL } from "@/services/stats";
+import { countDemoLeads, hideDemoLeads, visibleLeads } from "@/services/lead-visibility";
 import type { Lead, LeadStatus } from "@/types";
 
 export const metadata: Metadata = { title: "Leads" };
@@ -21,6 +22,8 @@ interface Params {
   dir?: string;
   status?: string;
   temperatura?: string;
+  /** `?demo=1` traz de volta os leads de demonstração, ocultos por padrão. */
+  demo?: string;
 }
 
 /** Score a partir do qual o dashboard trata o lead como "quente". */
@@ -87,7 +90,11 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
   // Todas as origens entram na lista: prospecção, cadastro manual e import
   // CSV. Filtrar por origem deixava a página permanentemente vazia mesmo
   // depois de criar um lead pelos botões que ficam nela mesma.
-  const active = db.leads.filter((l) => !l.archived);
+  // Com leads reais na base, os de demonstração saem da frente: eles têm
+  // score alto e, como a lista ordena por score, ocupavam as primeiras
+  // linhas para sempre.
+  const mostrarDemo = params.demo === "1";
+  const active = visibleLeads(db.leads, mostrarDemo).filter((l) => !l.archived);
   const filter = activeFilter(params);
   const visible = filter ? active.filter(filter.match) : active;
   const sorted = applySort(visible, params);
@@ -128,10 +135,9 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
         </div>
       )}
 
-      <DemoDataNotice
-        demoCount={db.leads.filter((l) => l.source === "demo").length}
-        realCount={db.leads.filter((l) => l.source !== "demo").length}
-      />
+      {hideDemoLeads(db.leads) && (
+        <DemoDataNotice demoCount={countDemoLeads(db.leads)} mostrando={mostrarDemo} />
+      )}
 
       {rows.length === 0 ? (
         filter ? (

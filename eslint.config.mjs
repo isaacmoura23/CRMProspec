@@ -15,6 +15,10 @@ const eslintConfig = defineConfig([
     // Runner e setup dos testes são CommonJS de propósito (rodam antes do tsx).
     "tests/*.cjs",
     "tests/stubs/**",
+    // Mesmo motivo no servidor MCP: o hook precisa ser CommonJS para o
+    // `--require` do Node interceptar os imports antes de tudo.
+    "mcp/*.cjs",
+    "mcp/stubs/**",
   ]),
 ]);
 

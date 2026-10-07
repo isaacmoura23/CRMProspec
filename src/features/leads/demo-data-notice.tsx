@@ -1,23 +1,23 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Loader2, Sparkles, Trash2 } from "lucide-react";
+import { Eye, EyeOff, Loader2, Sparkles, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
 import { removeDemoLeads } from "@/actions/leads";
 
 /**
- * Os leads do seed têm score alto e, com a lista ordenada por score, ficam
- * sempre no topo — parece que toda prospecção devolve as mesmas empresas.
- * Este aviso só aparece quando já existem leads reais na base.
+ * Os leads do seed têm score alto e, com a lista ordenada por score, ficavam
+ * sempre nas primeiras linhas — parecia que toda prospecção devolvia as
+ * mesmas empresas. Agora eles já entram ocultos; esta faixa explica onde
+ * foram parar e oferece removê-los de vez.
  */
-export function DemoDataNotice({ demoCount, realCount }: { demoCount: number; realCount: number }) {
+export function DemoDataNotice({ demoCount, mostrando }: { demoCount: number; mostrando: boolean }) {
   const router = useRouter();
   const { toast } = useToast();
   const [removendo, setRemovendo] = React.useState(false);
-
-  if (demoCount === 0 || realCount === 0) return null;
 
   async function remover() {
     setRemovendo(true);
@@ -32,15 +32,28 @@ export function DemoDataNotice({ demoCount, realCount }: { demoCount: number; re
   }
 
   return (
-    <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-warning/30 bg-warning-soft px-4 py-3 text-[13px] text-warning">
-      <Sparkles className="size-4 shrink-0" />
+    <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-border bg-surface px-4 py-2.5 text-[13px] text-muted-foreground">
+      <Sparkles className="size-4 shrink-0 text-faint-foreground" />
       <p className="min-w-0 flex-1">
-        <span className="font-medium">{demoCount} leads de demonstração</span> ainda estão na base, junto
-        com {realCount} leads reais. Eles têm score alto e aparecem no topo da lista — é o que faz parecer
-        que as buscas trazem sempre as mesmas empresas.
+        {mostrando ? (
+          <>
+            Mostrando também os <span className="font-medium text-foreground">{demoCount} leads de demonstração</span>,
+            que vêm com o sistema e têm score alto.
+          </>
+        ) : (
+          <>
+            <span className="font-medium text-foreground">{demoCount} leads de demonstração</span> estão ocultos —
+            eles vêm com o sistema e apareciam no topo por terem score alto.
+          </>
+        )}
       </p>
-      <Button size="sm" variant="secondary" disabled={removendo} onClick={remover}>
-        {removendo ? <Loader2 className="animate-spin" /> : <Trash2 />} Remover os de demonstração
+      <Button size="xs" variant="ghost" asChild>
+        <Link href={mostrando ? "/leads" : "/leads?demo=1"}>
+          {mostrando ? <EyeOff /> : <Eye />} {mostrando ? "Ocultar" : "Mostrar"}
+        </Link>
+      </Button>
+      <Button size="xs" variant="secondary" disabled={removendo} onClick={remover}>
+        {removendo ? <Loader2 className="animate-spin" /> : <Trash2 />} Remover de vez
       </Button>
     </div>
   );

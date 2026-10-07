@@ -441,6 +441,10 @@ export interface ProspectingJob {
   filtered?: number;
   /** Quantas empresas cada filtro derrubou — orienta qual critério afrouxar. */
   filtered_by?: Record<string, number>;
+  /** Quantas empresas a fonte chegou a devolver nesta busca. */
+  scanned?: number;
+  /** Quantas o job pediu à fonte (maior que `quantity` por causa do descarte). */
+  fetch_target?: number;
   errors: string[];
   campaign_id: string | null;
   created_at: string;
