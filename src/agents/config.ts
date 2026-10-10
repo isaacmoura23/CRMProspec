@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { SWEEP_SCOPES, type SweepScope } from "@/data/br-cities";
 import { normalizeBrazilianPhone } from "@/lib/outreach-policy";
 import type { AgentMode } from "@/types/agents";
 import type { SearchParams } from "@/types";
@@ -351,6 +352,14 @@ export interface ProspectorConfig {
   /** Dias até voltar a prospectar o mesmo nicho × cidade. */
   cooldown_days: number;
   filters: SearchParams["filters"];
+  /**
+   * Varredura contínua: além dos nichos ranqueados pelo Agente 1, percorre cidades do Brasil (as
+   * ainda não cobertas primeiro) procurando SÓ empresas sem site. Respeita os tetos diários.
+   */
+  sweep: boolean;
+  sweep_scope: SweepScope;
+  /** Quantos nichos (os de maior nota) entram na varredura. */
+  sweep_niches: number;
 }
 
 export const PROSPECTOR_DEFAULTS: ProspectorConfig = {
@@ -361,6 +370,9 @@ export const PROSPECTOR_DEFAULTS: ProspectorConfig = {
   cooldown_days: 7,
   // O alvo do negócio: quem não tem site ou tem um site fraco.
   filters: { weakWebsite: true, activeBusiness: true },
+  sweep: false,
+  sweep_scope: "principais",
+  sweep_niches: 3,
 };
 
 const FILTER_KEYS = [
@@ -395,5 +407,8 @@ export function normalizeProspectorConfig(raw: unknown): ProspectorConfig {
     min_niche_score: clampInt(r.min_niche_score, 0, 100, d.min_niche_score),
     cooldown_days: clampInt(r.cooldown_days, 0, 90, d.cooldown_days),
     filters: hasFilters ? normalizeFilters(r.filters) : { ...d.filters },
+    sweep: r.sweep === true,
+    sweep_scope: SWEEP_SCOPES.includes(r.sweep_scope as SweepScope) ? (r.sweep_scope as SweepScope) : d.sweep_scope,
+    sweep_niches: clampInt(r.sweep_niches, 1, 10, d.sweep_niches),
   };
 }

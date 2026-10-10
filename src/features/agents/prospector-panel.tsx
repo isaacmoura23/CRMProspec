@@ -44,6 +44,9 @@ export function ProspectorPanel({
   const [minScore, setMinScore] = React.useState(String(config.min_niche_score));
   const [cooldown, setCooldown] = React.useState(String(config.cooldown_days));
   const [filters, setFilters] = React.useState<Record<string, boolean>>({ ...config.filters } as Record<string, boolean>);
+  const [sweep, setSweep] = React.useState(config.sweep);
+  const [sweepScope, setSweepScope] = React.useState<string>(config.sweep_scope);
+  const [sweepNiches, setSweepNiches] = React.useState(String(config.sweep_niches));
 
   const best = targets.find((t) => t.status !== "banido");
   const [niche, setNiche] = React.useState(best?.niche ?? niches[0]?.key ?? "");
@@ -59,6 +62,9 @@ export function ProspectorPanel({
         min_niche_score: Number(minScore),
         cooldown_days: Number(cooldown),
         filters: Object.fromEntries(Object.entries(filters).filter(([, v]) => v)),
+        sweep,
+        sweep_scope: sweepScope,
+        sweep_niches: Number(sweepNiches),
       })
     );
   }
@@ -105,6 +111,43 @@ export function ProspectorPanel({
             </Button>
           </div>
           {!runnerAlive && <p className="mt-2 text-xs text-warning">O runner está parado: a prospecção espera na fila até ele voltar.</p>}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Varredura do Brasil</CardTitle>
+          <CardDescription>
+            Além dos nichos que o Analista ranqueou, percorre cidades do país aos poucos, procurando só empresas sem site (inclui ficha cujo “site” é um Instagram, Facebook ou Linktree). Começa pelas cidades ainda não varridas, capitais primeiro, e respeita os tetos diários — não promete cobrir o Brasil numa execução. O progresso está em “Lista de prospecção”.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <label className="flex cursor-pointer items-start gap-2.5">
+            <input type="checkbox" className="mt-0.5 size-4 accent-[var(--color-primary)]" checked={sweep} onChange={(e) => setSweep(e.target.checked)} disabled={!canAdmin} />
+            <span>
+              <span className="block text-[13px] font-medium">Ligar a varredura contínua</span>
+              <span className="block text-xs text-muted-foreground">Cada busca gasta requisições pagas ao Google (veja os tetos abaixo).</span>
+            </span>
+          </label>
+          <div className="grid max-w-xl gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label>Onde varrer</Label>
+              <Select value={sweepScope} onValueChange={setSweepScope} disabled={!canAdmin}>
+                <SelectTrigger aria-label="Onde varrer">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="capitais">Só as 27 capitais</SelectItem>
+                  <SelectItem value="principais">Capitais e grandes cidades (~110)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="sweep-niches">Nichos na varredura</Label>
+              <Input id="sweep-niches" type="number" min={1} max={10} value={sweepNiches} onChange={(e) => setSweepNiches(e.target.value)} disabled={!canAdmin} />
+              <p className="text-xs text-muted-foreground">Os de maior nota do Analista de Nicho.</p>
+            </div>
+          </div>
         </CardContent>
       </Card>
 

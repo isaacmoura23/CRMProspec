@@ -8,6 +8,10 @@ import { dayKey, spentToday } from "@/services/agents/log";
 import { PermanentTaskError, registerAgentHandler, type AgentTaskContext } from "@/services/agents/queue";
 import { agentRepo } from "@/services/agents/repository";
 import { getProspectorConfig } from "@/services/agents/settings";
+import { SUPPORTED_NICHES } from "@/agents/niche/agent";
+import { citySlug, scopeCities } from "@/data/br-cities";
+import { orgId } from "@/services/agents/repository";
+import type { ProspectCoverage } from "@/types/agents";
 import { ensureLeadsLoaded } from "@/services/lead-repository";
 import type { SearchParams } from "@/types";
 
@@ -126,6 +130,19 @@ async function run(ctx: AgentTaskContext): Promise<void> {
   await ctx.spend("leads", job.found_lead_ids.length, `${p.niche} · ${p.city}`);
   await ctx.progress(job.found_lead_ids.length, quantity, "Concluído");
 
+  await recordCoverage({
+    niche: p.niche,
+    niche_label: p.niche_label,
+    city: p.city,
+    state: p.state ?? null,
+    country: p.country,
+    scanned: job.scanned ?? 0,
+    found: job.found_lead_ids.length,
+    filtered: job.filtered ?? 0,
+    duplicates: job.duplicates,
+    places_requests: requests,
+  });
+
   ctx.setResult({
     job_id: job.id,
     niche: p.niche,
@@ -146,6 +163,65 @@ async function run(ctx: AgentTaskContext): Promise<void> {
   if (job.status === "failed") {
     throw new PermanentTaskError(job.errors[0] ?? "A prospecção falhou.");
   }
+}
+
+/** Soma o que esta execução varreu ao registro de cobertura do nicho × cidade. */
+export async function recordCoverage(c: Omit<ProspectCoverage, "id" | "organization_id" | "runs" | "last_run_at" | "created_at" | "updated_at">, now: Date = new Date()): Promise<ProspectCoverage> {
+  const repo = agentRepo();
+  const id = `${c.niche}|${citySlug(c.city)}`;
+  const iso = now.toISOString();
+  const prev = await repo.get("prospect_coverage", id);
+  const row: ProspectCoverage = {
+    id,
+    organization_id: orgId(),
+    niche: c.niche,
+    niche_label: c.niche_label,
+    city: c.city,
+    state: c.state,
+    country: c.country,
+    runs: (prev?.runs ?? 0) + 1,
+    scanned: (prev?.scanned ?? 0) + c.scanned,
+    found: (prev?.found ?? 0) + c.found,
+    filtered: (prev?.filtered ?? 0) + c.filtered,
+    duplicates: (prev?.duplicates ?? 0) + c.duplicates,
+    places_requests: (prev?.places_requests ?? 0) + c.places_requests,
+    last_run_at: iso,
+    created_at: prev?.created_at ?? iso,
+    updated_at: iso,
+  };
+  return repo.upsert("prospect_coverage", row);
+}
+
+/** Filtros da varredura: o alvo é SÓ empresa sem site (a ficha cujo "site" é uma rede social conta como sem site). */
+export const SWEEP_FILTERS: NonNullable<SearchParams["filters"]> = { noWebsite: true, activeBusiness: true, hasPhone: true };
+
+/**
+ * Próximas células (nicho × cidade) da varredura: dos nichos de maior nota, a cidade que nunca foi
+ * varrida (capitais antes) e, esgotadas, a varrida há mais tempo — sempre fora da carência.
+ */
+export async function sweepCells(cfg: { sweep_scope: Parameters<typeof scopeCities>[0]; sweep_niches: number; cooldown_days: number }, now: Date = new Date()): Promise<Array<{ niche: string; niche_label: string; city: string; state: string }>> {
+  const repo = agentRepo();
+  const nowIso = now.toISOString();
+  const targets = (await repo.list("niche_targets")).filter((t) => t.status !== "banido" && t.valid_until > nowIso);
+  const bestByNiche = new Map<string, number>();
+  for (const t of targets) bestByNiche.set(t.niche, Math.max(bestByNiche.get(t.niche) ?? 0, t.score));
+  const ranked = [...SUPPORTED_NICHES].sort((a, b) => (bestByNiche.get(b.key) ?? -1) - (bestByNiche.get(a.key) ?? -1));
+  const niches = ranked.slice(0, cfg.sweep_niches);
+
+  const coverage = new Map((await repo.list("prospect_coverage")).map((c) => [c.id, c]));
+  const cooldownFrom = new Date(now.getTime() - cfg.cooldown_days * 86_400_000).toISOString();
+  const cities = scopeCities(cfg.sweep_scope);
+  const out: Array<{ niche: string; niche_label: string; city: string; state: string }> = [];
+  for (const n of niches) {
+    const order = cities
+      .map((city, i) => ({ city, i, seen: coverage.get(`${n.key}|${citySlug(city.city)}`) }))
+      .filter((x) => !x.seen || x.seen.last_run_at <= cooldownFrom)
+      // Nunca varrida primeiro (na ordem da lista: capitais antes); depois a varrida há mais tempo.
+      .sort((a, b) => Number(Boolean(a.seen)) - Number(Boolean(b.seen)) || (a.seen?.last_run_at ?? "").localeCompare(b.seen?.last_run_at ?? "") || a.i - b.i);
+    const next = order[0];
+    if (next) out.push({ niche: n.key, niche_label: n.label, city: next.city.city, state: next.city.state });
+  }
+  return out;
 }
 
 async function plan(): Promise<PlannedTask[]> {
@@ -183,7 +259,20 @@ async function plan(): Promise<PlannedTask[]> {
   // Em ordem de prioridade: se o melhor já foi proposto ou recusado hoje, o
   // planejador cai para o seguinte (e só propõe um por passada).
   const quantity = Math.min(cfg.quantity_per_run, leadsLeft);
-  return targets.slice(0, 5).map((t) => ({
+  const sweep: PlannedTask[] = [];
+  if (cfg.sweep) {
+    for (const cell of await sweepCells(cfg, now)) {
+      sweep.push({
+        agent: "prospector" as const,
+        kind: PROSPECT_RUN,
+        payload: { niche: cell.niche, niche_label: cell.niche_label, city: cell.city, state: cell.state, country: "Brasil", quantity, filters: SWEEP_FILTERS, sweep: true },
+        dedupeKey: `${PROSPECT_RUN}:${cell.niche}:${slug(cell.city)}:${dayKey()}`,
+        title: `Varredura: ${quantity} empresas sem site de ${cell.niche_label} em ${cell.city}`,
+        detail: `Cidade ainda não varrida para este nicho (varredura do Brasil). Restam ${leadsLeft} leads no teto de hoje.`,
+      });
+    }
+  }
+  const ranked: PlannedTask[] = targets.slice(0, 5).map((t) => ({
     agent: "prospector" as const,
     kind: PROSPECT_RUN,
     payload: {
@@ -198,6 +287,8 @@ async function plan(): Promise<PlannedTask[]> {
     title: `Prospectar ${quantity} leads de ${t.niche_label} em ${t.city}`,
     detail: `Score do nicho: ${t.score}${t.status === "fixado" ? " (fixado por você)" : ""}. Restam ${leadsLeft} leads no teto de hoje.`,
   }));
+  const seen = new Set<string>();
+  return [...ranked, ...sweep].filter((t) => (seen.has(t.dedupeKey) ? false : (seen.add(t.dedupeKey), true)));
 }
 
 export const prospector: AgentDefinition = {

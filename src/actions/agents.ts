@@ -107,6 +107,9 @@ const prospectorConfigSchema = z.object({
   min_niche_score: z.number().int().min(0).max(100),
   cooldown_days: z.number().int().min(0).max(90),
   filters: z.record(z.string(), z.boolean()),
+  sweep: z.boolean().optional(),
+  sweep_scope: z.enum(["capitais", "principais"]).optional(),
+  sweep_niches: z.number().int().min(1).max(10).optional(),
 });
 
 export async function saveProspectorConfig(input: unknown): Promise<ActionResult> {

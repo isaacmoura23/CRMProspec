@@ -567,6 +567,32 @@ export interface AdReport {
   created_at: string;
 }
 
+/* ------------------------------------------------------------------ */
+/* Agente 2 — cobertura da varredura                                   */
+/* ------------------------------------------------------------------ */
+
+/** O que já foi varrido de um nicho em uma cidade (id = `<nicho>|<cidade sem acento>`). */
+export interface ProspectCoverage {
+  id: string;
+  organization_id: string;
+  niche: string;
+  niche_label: string;
+  city: string;
+  state: string | null;
+  country: string;
+  runs: number;
+  /** Empresas que a fonte devolveu e o agente examinou. */
+  scanned: number;
+  /** Leads novos criados. */
+  found: number;
+  filtered: number;
+  duplicates: number;
+  places_requests: number;
+  last_run_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface AgentData {
   settings: AgentSettingsRow[];
   tasks: AgentTask[];
@@ -588,6 +614,7 @@ export interface AgentData {
   social_posts: SocialPost[];
   ad_campaigns: AdCampaign[];
   ad_reports: AdReport[];
+  prospect_coverage: ProspectCoverage[];
 }
 
 export function emptyAgentData(): AgentData {
@@ -612,5 +639,6 @@ export function emptyAgentData(): AgentData {
     social_posts: [],
     ad_campaigns: [],
     ad_reports: [],
+    prospect_coverage: [],
   };
 }
