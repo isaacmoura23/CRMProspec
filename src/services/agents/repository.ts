@@ -40,6 +40,7 @@ const TABLE: Record<AgentCollection, string> = {
   ad_campaigns: "ad_campaigns",
   ad_reports: "ad_reports",
   prospect_coverage: "prospect_coverage",
+  creatives: "creatives",
 };
 
 /** Chave natural de cada coleção (o `id` em todas, exceto onde o contrato diz outra coisa). */

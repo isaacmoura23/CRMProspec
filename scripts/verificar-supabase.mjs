@@ -78,6 +78,7 @@ const TABELAS = [
   ["ad_campaigns", "0011_social_trafego.sql"],
   ["ad_reports", "0011_social_trafego.sql"],
   ["prospect_coverage", "0012_prospeccao.sql"],
+  ["creatives", "0013_criativos.sql"],
 ];
 const pendentes = new Set();
 for (const [tabela, migracao] of TABELAS) {

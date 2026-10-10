@@ -5,7 +5,8 @@ import { uid } from "@/lib/utils";
 import { dayKey, logAgentEvent } from "@/services/agents/log";
 import { agentRepo, orgId } from "@/services/agents/repository";
 import { getTrafficConfig } from "@/services/agents/settings";
-import type { AdCampaign, AdCampaignStatus, AdReport } from "@/types/agents";
+import { approveCreative, createCreative, integrity, regenerateCreative, rejectCreative, retireCreative, type CreativeDeps } from "@/services/creatives/engine";
+import type { AdCampaign, AdCampaignStatus, AdReport, Creative } from "@/types/agents";
 
 /**
  * Campanhas de anúncio: propor, aprovar o rascunho, ativar, ajustar orçamento e medir.
@@ -16,6 +17,9 @@ import type { AdCampaign, AdCampaignStatus, AdReport } from "@/types/agents";
  * `proposeBudgetChange`, que criam pedidos em `approvals` e não mexem em dinheiro.
  * O provedor padrão é "manual": você cria a campanha na plataforma de anúncios e o
  * CRM guarda o controle, os tetos e os relatórios.
+ *
+ * Cada campanha pode ter um criativo (imagem da própria empresa, feita em código). Com ele, a campanha só
+ * ativa depois de você aprovar a imagem — aprovar a imagem é um clique, e ativar é outro.
  */
 
 const neverSay = () => getDb().company_profile.never_say;
@@ -39,8 +43,14 @@ export async function spendSummary(now: Date = new Date()): Promise<SpendSummary
   };
 }
 
-/** Cria o rascunho "pendente" e o pedido de aprovação. É o máximo que um agente alcança. */
-export async function proposeCampaign(input: CampaignDraft & { objective: AdCampaign["objective"]; reason?: string }, now: Date = new Date()): Promise<AdCampaign> {
+export interface CampaignCreativeOptions {
+  builder?: Creative["builder"];
+  budgetUsd?: number;
+  deps?: CreativeDeps;
+}
+
+/** Cria o rascunho "pendente" e o pedido de aprovação (e, com `creative`, a imagem). É o máximo que um agente alcança. */
+export async function proposeCampaign(input: CampaignDraft & { objective: AdCampaign["objective"]; reason?: string }, now: Date = new Date(), creative?: CampaignCreativeOptions): Promise<AdCampaign> {
   const violation = checkCampaign(input, neverSay(), dayKey(now));
   if (violation) throw new Error(`Campanha reprovada: ${violation}`);
   const id = uid("adc");
@@ -62,6 +72,7 @@ export async function proposeCampaign(input: CampaignDraft & { objective: AdCamp
     body: input.body.trim(),
     cta: input.cta.trim(),
     landing_url: input.landing_url,
+    creative_id: null,
     approval_id: approvalId,
     external_id: null,
     idempotency_key: `campaign:${id}`,
@@ -92,7 +103,55 @@ export async function proposeCampaign(input: CampaignDraft & { objective: AdCamp
     expires_at: expires,
   });
   await logAgentEvent("traffic-manager", "info", "campaign.proposed", `Propôs o rascunho da campanha "${campaign.name}".`, { campaign_id: id });
+  if (creative) {
+    const c = await createCreative({ ownerKind: "campaign", ownerId: id, format: "anuncio", headline: campaign.headline, body: campaign.body, cta: campaign.cta, builder: creative.builder, claudeBudgetUsd: creative.budgetUsd }, { now: () => now, ...creative.deps });
+    campaign.creative_id = c.id;
+    await agentRepo().update("ad_campaigns", id, { creative_id: c.id });
+  }
   return campaign;
+}
+
+/* ------------------------------ Criativo da campanha ------------------------------ */
+
+/** Aprovar a IMAGEM da campanha: não gasta nada e não ativa nada (ativar é outro clique). */
+export async function approveCampaignCreative(campaignId: string, userId: string, now: Date = new Date()): Promise<{ ok: true; creative: Creative } | { ok: false; error: string }> {
+  const c = await agentRepo().get("ad_campaigns", campaignId);
+  if (!c) return { ok: false, error: "Campanha não encontrada." };
+  if (!c.creative_id) return { ok: false, error: "Esta campanha não tem criativo." };
+  if (c.status === "recusada" || c.status === "expirada" || c.status === "encerrada") return { ok: false, error: `A campanha está "${c.status}".` };
+  const r = await approveCreative(c.creative_id, userId, { keepUntil: new Date(now.getTime() + 60 * 86_400_000), now });
+  if (r.ok) await logAgentEvent("traffic-manager", "info", "campaign.creative_approved", `Imagem da campanha "${c.name}" aprovada. Ativar continua sendo outro clique, dentro dos tetos.`, { campaign_id: c.id });
+  return r;
+}
+
+export async function rejectCampaignCreative(campaignId: string, now: Date = new Date()): Promise<boolean> {
+  const c = await agentRepo().get("ad_campaigns", campaignId);
+  if (!c?.creative_id) return false;
+  return rejectCreative(c.creative_id, now);
+}
+
+/** Outra composição da imagem (a anterior é descartada); só enquanto a imagem não foi aprovada. */
+export async function regenerateCampaignCreative(campaignId: string, opts: CampaignCreativeOptions = {}): Promise<{ ok: true; creative: Creative } | { ok: false; error: string }> {
+  const c = await agentRepo().get("ad_campaigns", campaignId);
+  if (!c) return { ok: false, error: "Campanha não encontrada." };
+  if (c.status === "ativa" || c.status === "encerrada" || c.status === "recusada" || c.status === "expirada") return { ok: false, error: `A campanha está "${c.status}": não dá para trocar a imagem.` };
+  const cfg = await getTrafficConfig();
+  const o = { builder: opts.builder ?? cfg.creative_builder, claudeBudgetUsd: opts.budgetUsd ?? cfg.creative_budget_usd };
+  let fresh = c.creative_id ? await regenerateCreative(c.creative_id, opts.deps ?? {}, o) : null;
+  if (!fresh) fresh = await createCreative({ ownerKind: "campaign", ownerId: c.id, format: "anuncio", headline: c.headline, body: c.body, cta: c.cta, ...o }, opts.deps ?? {});
+  await agentRepo().update("ad_campaigns", c.id, { creative_id: fresh.id, updated_at: new Date().toISOString() });
+  return { ok: true, creative: fresh };
+}
+
+/** A imagem da campanha está aprovada e íntegra? Sem imagem, não há o que conferir. */
+async function creativeGate(c: AdCampaign): Promise<string | null> {
+  if (!c.creative_id) return null;
+  const cr = await agentRepo().get("creatives", c.creative_id);
+  if (!cr) return "O criativo da campanha não existe mais: gere outro e aprove.";
+  if (cr.status === "pendente") return "Aprove o criativo (a imagem) da campanha antes de ativar.";
+  if (cr.status !== "aprovado") return `O criativo da campanha está "${cr.status}": gere outro e aprove.`;
+  const ok = integrity(cr);
+  return ok.ok ? null : `${ok.reason} Gere outro criativo e aprove.`;
 }
 
 async function move(c: AdCampaign, to: AdCampaignStatus, patch: Partial<AdCampaign> = {}, now: Date = new Date()): Promise<AdCampaign> {
@@ -122,6 +181,7 @@ export async function rejectCampaignDraft(campaignId: string, userId: string, no
   if (!c || c.status !== "pendente") return false;
   await move(c, "recusada", {}, now);
   if (c.approval_id) await agentRepo().update("approvals", c.approval_id, { status: "recusado", decided_by: userId, decided_at: now.toISOString() });
+  await retireCreative(c.creative_id, now);
   return true;
 }
 
@@ -143,6 +203,11 @@ export async function activateCampaign(campaignId: string, userId: string, opts:
   const from = c.status;
   if (c.status !== "aprovado" && c.status !== "pausada") return { ok: false, error: `Só uma campanha aprovada ou pausada pode ser ativada (esta está "${c.status}").` };
   if (c.platform !== "manual") return { ok: false, error: "Esta plataforma ainda não está ligada: crie a campanha lá e use o modo manual." };
+  const creativeIssue = await creativeGate(c);
+  if (creativeIssue) {
+    await logAgentEvent("traffic-manager", "warn", "campaign.blocked", `Ativação de "${c.name}" barrada: ${creativeIssue}`, { campaign_id: c.id, code: "criativo" });
+    return { ok: false, error: creativeIssue };
+  }
   const caps = await capsFor(c.id, c.daily_budget_cents, c.end_date, now);
   if (!caps.ok) {
     await logAgentEvent("traffic-manager", "warn", "campaign.blocked", `Ativação de "${c.name}" barrada pelo teto de gasto: ${caps.reason}`, { campaign_id: c.id, code: caps.code });
@@ -256,6 +321,7 @@ export async function expireStaleCampaigns(now: Date = new Date()): Promise<numb
   for (const c of stale) {
     await move(c, "expirada", {}, now);
     if (c.approval_id) await agentRepo().update("approvals", c.approval_id, { status: "expirado", decided_at: now.toISOString() });
+    await retireCreative(c.creative_id, now);
   }
   return stale.length;
 }

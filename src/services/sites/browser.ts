@@ -42,10 +42,13 @@ export const runBrowser: BrowserRunner = (browser, args, timeoutMs) =>
     });
   });
 
-const MEASURE = `<script>(function(){var errs=[];
-function lum(c){var m=c&&c.match(/[\\d.]+/g);if(!m||m.length<3)return null;var v=[0,1,2].map(function(i){var x=parseFloat(m[i])/255;return x<=.03928?x/12.92:Math.pow((x+.055)/1.055,2.4)});return{l:.2126*v[0]+.7152*v[1]+.0722*v[2],a:m.length>3?parseFloat(m[3]):1}}
+/** Funções de contraste de texto (ES5), reaproveitadas pela verificação das artes: `lowContrast()` devolve até 3 exemplos abaixo de 3:1. */
+export const CONTRAST_JS = `function lum(c){var m=c&&c.match(/[\\d.]+/g);if(!m||m.length<3)return null;var v=[0,1,2].map(function(i){var x=parseFloat(m[i])/255;return x<=.03928?x/12.92:Math.pow((x+.055)/1.055,2.4)});return{l:.2126*v[0]+.7152*v[1]+.0722*v[2],a:m.length>3?parseFloat(m[3]):1}}
 function bgOf(el){while(el&&el.nodeType===1){var s=getComputedStyle(el);var b=lum(s.backgroundColor);if(b&&b.a>.9)return b.l;if(s.backgroundImage&&s.backgroundImage!=='none')return null;el=el.parentElement}return 1}
-function lowContrast(){var bad=[];document.querySelectorAll('body *').forEach(function(el){if(bad.length>=3)return;var own='';for(var i=0;i<el.childNodes.length;i++){if(el.childNodes[i].nodeType===3)own+=el.childNodes[i].nodeValue}own=own.replace(/\\s+/g,' ').trim();if(!own)return;var s=getComputedStyle(el);if(s.display==='none'||s.visibility==='hidden')return;var fg=lum(s.color),bg=bgOf(el);if(!fg||bg===null||fg.a<.9)return;var hi=Math.max(fg.l,bg),lo=Math.min(fg.l,bg);if((hi+.05)/(lo+.05)<3)bad.push(el.tagName.toLowerCase()+': '+own.slice(0,28))});return bad}window.addEventListener('error',function(e){errs.push(String(e.message||'erro'))});
+function lowContrast(){var bad=[];document.querySelectorAll('body *').forEach(function(el){if(bad.length>=3)return;var own='';for(var i=0;i<el.childNodes.length;i++){if(el.childNodes[i].nodeType===3)own+=el.childNodes[i].nodeValue}own=own.replace(/\\s+/g,' ').trim();if(!own)return;var s=getComputedStyle(el);if(s.display==='none'||s.visibility==='hidden')return;var fg=lum(s.color),bg=bgOf(el);if(!fg||bg===null||fg.a<.9)return;var hi=Math.max(fg.l,bg),lo=Math.min(fg.l,bg);if((hi+.05)/(lo+.05)<3)bad.push(el.tagName.toLowerCase()+': '+own.slice(0,28))});return bad}window.addEventListener('error',function(e){errs.push(String(e.message||'erro'))});`;
+
+const MEASURE = `<script>(function(){var errs=[];
+${CONTRAST_JS}
 function done(){var bad=[];document.querySelectorAll('a[href^="#"]').forEach(function(a){var id=a.getAttribute('href').slice(1);if(id&&!document.getElementById(id))bad.push(id)});
 var r={w:window.innerWidth,sw:document.documentElement.scrollWidth,overflow:document.documentElement.scrollWidth>window.innerWidth+1,badAnchors:bad,errors:errs,h1:document.querySelectorAll('h1').length};
 r.lowContrast=lowContrast();document.title='ATLAS_VERIFY:'+JSON.stringify(r)}

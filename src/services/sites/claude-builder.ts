@@ -3,7 +3,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { UI } from "@/lib/site-generate";
 import { allowedExternalHrefs } from "@/lib/site-verify";
-import { SAFE_TOOLS, type ClaudeRunner } from "@/services/claude/headless";
+import { authorLoop } from "@/services/claude/author";
+import type { ClaudeRunner } from "@/services/claude/headless";
 import type { DossierProfile, SiteCheck } from "@/types/agents";
 
 /**
@@ -131,51 +132,25 @@ function repairPrompt(failed: SiteCheck[]): string {
   ].join("\n");
 }
 
-/** Tamanho máximo aceito para a página que o modelo devolve. */
-const MAX_HTML_BYTES = 200_000;
-
 export async function buildWithClaude(input: ClaudeBuildInput): Promise<ClaudeBuildResult> {
-  const clock = input.now ?? (() => new Date());
   const { dir, skills } = prepareWorkspace(input);
-  const file = path.join(dir, "index.html");
-  let cost = 0;
-  let rounds = 0;
-  let checks: SiteCheck[] = [];
-  const spare = () => Math.max(0, input.budgetUsd - cost);
-
   try {
-    for (let round = 0; round <= input.repairRounds; round++) {
-      if (clock().getTime() >= input.deadline.getTime()) return { ok: false, reason: "Passou o prazo da prévia antes de o Claude Code terminar.", costUsd: cost, rounds, checks };
-      if (spare() < 0.05) return { ok: false, reason: `O teto de gasto do construtor (US$ ${input.budgetUsd.toFixed(2)}) acabou.`, costUsd: cost, rounds, checks };
-
-      const failed = checks.filter((c) => !c.ok);
-      const run = await input.runner({
-        cwd: dir,
-        prompt: round === 0 ? firstPrompt : repairPrompt(failed),
-        systemAppend: SYSTEM,
-        tools: [...SAFE_TOOLS],
-        budgetUsd: spare(),
-        timeoutMs: input.timeoutMs,
-        model: input.model,
-      });
-      rounds++;
-      cost += run.costUsd;
-      if (!run.ok) return { ok: false, reason: run.error ?? "O Claude Code não terminou.", costUsd: cost, rounds, checks };
-
-      let html: string;
-      try {
-        const stat = fs.statSync(file);
-        if (stat.size > MAX_HTML_BYTES) return { ok: false, reason: "O index.html que o Claude Code escreveu é grande demais.", costUsd: cost, rounds, checks };
-        html = fs.readFileSync(file, "utf8");
-      } catch {
-        return { ok: false, reason: "O Claude Code não deixou um index.html.", costUsd: cost, rounds, checks };
-      }
-
-      checks = await input.verify(html);
-      if (checks.every((c) => c.ok)) return { ok: true, html, checks, costUsd: cost, rounds, skills };
-    }
-    const failed = checks.filter((c) => !c.ok).map((c) => c.name);
-    return { ok: false, reason: `Depois de ${rounds} rodada(s), a verificação ainda reprova: ${failed.join("; ")}.`, costUsd: cost, rounds, checks };
+    const res = await authorLoop({
+      dir,
+      file: "index.html",
+      runner: input.runner,
+      systemAppend: SYSTEM,
+      firstPrompt,
+      repairPrompt,
+      verify: input.verify,
+      budgetUsd: input.budgetUsd,
+      timeoutMs: input.timeoutMs,
+      repairRounds: input.repairRounds,
+      model: input.model,
+      deadline: input.deadline,
+      now: input.now,
+    });
+    return res.ok ? { ...res, skills } : res;
   } finally {
     // O espaço de trabalho tem texto de terceiros e cópias das skills: não fica para trás.
     fs.rmSync(dir, { recursive: true, force: true });

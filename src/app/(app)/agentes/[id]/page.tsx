@@ -84,7 +84,7 @@ export default async function AgentePage({ params }: { params: Promise<{ id: str
 
         {socialPanel && (
           <>
-            <SocialPanel posts={socialPanel.posts} instagramConfigured={socialPanel.instagramConfigured} canDecide={canAdmin} canRun={canRun} />
+            <SocialPanel data={socialPanel} canDecide={canAdmin} canRun={canRun} />
             {!socialPanel.instagramConfigured && (
               <Card>
                 <CardHeader>
@@ -98,14 +98,14 @@ export default async function AgentePage({ params }: { params: Promise<{ id: str
                 </div>
               </Card>
             )}
-            <SocialConfigForm config={socialPanel.config} canAdmin={canAdmin} />
+            <SocialConfigForm config={socialPanel.config} claudeFound={socialPanel.claudeFound} canAdmin={canAdmin} />
           </>
         )}
         {trafficPanel && (
           <>
             <SpendSummaryCard summary={trafficPanel.summary} />
             <CampaignList rows={trafficPanel.rows} canDecide={canAdmin} canRun={canRun} />
-            <TrafficConfigForm config={trafficPanel.config} canAdmin={canAdmin} />
+            <TrafficConfigForm config={trafficPanel.config} claudeFound={trafficPanel.claudeFound} canAdmin={canAdmin} />
           </>
         )}
         {sitePanel && (

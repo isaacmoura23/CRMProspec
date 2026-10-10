@@ -207,10 +207,32 @@ export function normalizeSellerConfig(raw: unknown): SellerConfig {
 }
 
 /* ------------------------------------------------------------------ */
+/* Criativos (artes e vídeos dos Agentes 6 e 7)                        */
+/* ------------------------------------------------------------------ */
+
+export interface CreativeConfig {
+  /**
+   * Quem escreve a arte (imagens): "modelos" (modelos de arte em código, sem custo) ou "claude-code"
+   * (o Claude Code em modo restrito escreve o HTML; a mesma verificação vale e, se falhar, sai o modelo).
+   * Vídeos (Reels) sempre usam os modelos de cena + ffmpeg.
+   */
+  creative_builder: "modelos" | "claude-code";
+  /** Teto de gasto (US$) do Claude Code por arte, somando as rodadas. */
+  creative_budget_usd: number;
+}
+
+function normalizeCreativeConfig(r: Record<string, unknown>): CreativeConfig {
+  return {
+    creative_builder: r.creative_builder === "claude-code" ? "claude-code" : "modelos",
+    creative_budget_usd: clampMoney(r.creative_budget_usd, 0.1, 5, 0.5),
+  };
+}
+
+/* ------------------------------------------------------------------ */
 /* Agente 6 — Gestor de tráfego                                        */
 /* ------------------------------------------------------------------ */
 
-export interface TrafficConfig {
+export interface TrafficConfig extends CreativeConfig {
   /** Teto de gasto por dia (centavos): a soma dos orçamentos diários das campanhas ativas nunca passa disto. */
   daily_cap_cents: number;
   /** Teto de gasto por mês (centavos): o gasto do mês mais o previsto das ativas nunca passa disto. */
@@ -223,6 +245,8 @@ export const TRAFFIC_DEFAULTS: TrafficConfig = {
   daily_cap_cents: 3_000,
   monthly_cap_cents: 60_000,
   max_pending_campaigns: 3,
+  creative_builder: "modelos",
+  creative_budget_usd: 0.5,
 };
 
 export function normalizeTrafficConfig(raw: unknown): TrafficConfig {
@@ -234,6 +258,7 @@ export function normalizeTrafficConfig(raw: unknown): TrafficConfig {
     daily_cap_cents: daily,
     monthly_cap_cents: Math.max(daily, clampInt(r.monthly_cap_cents, 0, 1_000_000_000, d.monthly_cap_cents)),
     max_pending_campaigns: clampInt(r.max_pending_campaigns, 1, 20, d.max_pending_campaigns),
+    ...normalizeCreativeConfig(r),
   };
 }
 
@@ -241,16 +266,42 @@ export function normalizeTrafficConfig(raw: unknown): TrafficConfig {
 /* Agente 7 — Mídias sociais                                           */
 /* ------------------------------------------------------------------ */
 
-export interface SocialConfig {
-  /** Propostas de post esperando ao mesmo tempo. */
+export interface SocialConfig extends CreativeConfig {
+  /** Propostas de post esperando ao mesmo tempo (o teto do calendário). */
   max_pending_posts: number;
   /** Dias até uma proposta sem decisão expirar. */
   proposal_ttl_days: number;
   /** Hashtags que entram no fim da legenda (sem o "#"; até 8). */
   hashtags: string[];
+  /** Quantos dias à frente o calendário editorial é planejado. */
+  calendar_days: number;
+  /** Posts por semana de cada formato (o calendário reparte nos próximos dias). */
+  weekly_feed: number;
+  weekly_reel: number;
+  weekly_story: number;
+  /** Hora sugerida (America/Sao_Paulo) para cada formato. */
+  feed_hour: number;
+  reel_hour: number;
+  story_hour: number;
+  /** Passado este tempo do horário agendado, o publicador não publica mais: avisa em vez de sair fora de hora. */
+  late_window_hours: number;
 }
 
-export const SOCIAL_DEFAULTS: SocialConfig = { max_pending_posts: 3, proposal_ttl_days: 2, hashtags: [] };
+export const SOCIAL_DEFAULTS: SocialConfig = {
+  max_pending_posts: 6,
+  proposal_ttl_days: 3,
+  hashtags: [],
+  calendar_days: 7,
+  weekly_feed: 3,
+  weekly_reel: 1,
+  weekly_story: 2,
+  feed_hour: 12,
+  reel_hour: 18,
+  story_hour: 9,
+  late_window_hours: 3,
+  creative_builder: "modelos",
+  creative_budget_usd: 0.5,
+};
 
 export function normalizeSocialConfig(raw: unknown): SocialConfig {
   const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
@@ -259,9 +310,18 @@ export function normalizeSocialConfig(raw: unknown): SocialConfig {
     ? [...new Set(r.hashtags.map((t) => String(t).replace(/^#+/, "").replace(/[^\p{L}\p{N}_]/gu, "").slice(0, 30)).filter(Boolean))].slice(0, 8)
     : d.hashtags;
   return {
-    max_pending_posts: clampInt(r.max_pending_posts, 1, 10, d.max_pending_posts),
+    max_pending_posts: clampInt(r.max_pending_posts, 1, 20, d.max_pending_posts),
     proposal_ttl_days: clampInt(r.proposal_ttl_days, 1, 14, d.proposal_ttl_days),
     hashtags: tags,
+    calendar_days: clampInt(r.calendar_days, 1, 14, d.calendar_days),
+    weekly_feed: clampInt(r.weekly_feed, 0, 7, d.weekly_feed),
+    weekly_reel: clampInt(r.weekly_reel, 0, 7, d.weekly_reel),
+    weekly_story: clampInt(r.weekly_story, 0, 14, d.weekly_story),
+    feed_hour: clampInt(r.feed_hour, 0, 23, d.feed_hour),
+    reel_hour: clampInt(r.reel_hour, 0, 23, d.reel_hour),
+    story_hour: clampInt(r.story_hour, 0, 23, d.story_hour),
+    late_window_hours: clampInt(r.late_window_hours, 1, 24, d.late_window_hours),
+    ...normalizeCreativeConfig(r),
   };
 }
 
