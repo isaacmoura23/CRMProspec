@@ -261,6 +261,39 @@ retomar sem precisar reconstruir o contexto.
 - **Limites:** sem transcrição de vídeo, sem ofertas detalhadas, imagens e tom de voz (a F4 precisa deles e os
   extrai do próprio site), e sem Playwright — só o navegador instalado, em modo headless.
 
+### AgentOS: Programador de Sites (prévia) — fase 4 (11/10/2026)
+- **A porta** (`src/lib/site-gate.ts`, função pura testada): a construção só começa com o lead em "interessado" ou
+  "reunião", **interesse explícito registrado** (a mensagem do lead que o comprova, gravada pela fase 3c), **reunião
+  agendada com data futura**, **tempo hábil** (pronta até reunião − 2 h; sem tempo, avisa em vez de entregar pela
+  metade) e **dossiê válido e real** com o mínimo (nome e um contato). `enqueueSiteBuild` **lança erro** se qualquer
+  uma faltar, e a porta é conferida de novo quando a tarefa começa.
+- **Entrada só o dossiê** (Agente 3, que agora guarda um `profile` com os campos comprovados e a origem de cada
+  um). O gerador (`lib/site-generate.ts`) é determinístico, não um modelo: cada texto da página é um valor do perfil ou
+  uma palavra do vocabulário fixo da interface. Página estática (HTML + CSS inline), **sem script, sem imagem e sem
+  recurso externo**; seção sem dado não existe; nada de depoimento, preço ou foto de banco. Loja virtual fica de fora:
+  a v1 é vitrine com pedido pelo WhatsApp.
+- **Verificação independente** (`lib/site-verify.ts` + navegador): nada de texto fora do dossiê (palavra a palavra),
+  links só os do perfil, contatos idênticos, noindex, sem recurso externo; e no **Chrome/Edge headless**: erro de
+  console, rolagem lateral no celular, âncoras quebradas e capturas de tela desktop e celular. Qualquer falha e a
+  prévia não é entregue (arquivos apagados). Sem navegador a prévia também não sai (configurável).
+- **Prévia** em `/previa/<token>` (192 bits aleatórios, pública para o proxy porque quem recebe não tem conta):
+  `X-Robots-Tag: noindex`, CSP sem script, `no-store`, expira depois da reunião (7 dias) e pode ser tirada do ar. Só
+  uma prévia viva por lead. Capturas pelo painel autenticado. Aviso no sino e no seu WhatsApp (`owner_notices`,
+  `kind=previa`; o endereço completo só vai se houver `PUBLIC_BASE_URL`).
+- Tela `/agentes/site-builder` (prévias, reuniões esperando com o motivo da porta fechada, configuração) e cartão da
+  prévia na aba Dossiê do lead. Migração `0010_sites.sql` (já no `setup-producao.sql` e no verificador).
+- Verificado de verdade: do dossiê à prévia no runner com o Chrome instalado (12 de 12 verificações), endereço servido
+  com os cabeçalhos certos, token errado e fora do formato dando 404, cartão no lead, e a prévia aberta no navegador.
+- Testes: `npm test` (425), `tsc`, `lint` e `build` limpos.
+- **Desvios da especificação:** o gerador é por modelos, não Claude Code com Skills/Playwright/Figma (não dá para
+  verificar uma construção por modelo de linguagem sem uma chave, e a verificação aqui é a mesma que valeria para
+  ela); a verificação de navegador usa o Chrome/Edge instalados em modo headless, não o Playwright MCP; imagens do
+  cliente não são usadas (a prévia não tem imagem nenhuma); não há deploy de prévia em hospedagem — o endereço vive no
+  seu computador (para mostrar fora dele, aponte `PUBLIC_BASE_URL` para um túnel seu); publicar de verdade
+  exigiria consentimento e não existe.
+- **Não verificado:** a migração `0010` no Supabase e o comportamento com sites reais de clientes (o teste ao vivo
+  usou um site público de exemplo, com pouco conteúdo).
+
 ## Pela metade — Supabase
 
 Objetivo: em produção o banco vive na memória da instância, então leads

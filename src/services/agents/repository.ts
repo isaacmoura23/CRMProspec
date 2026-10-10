@@ -35,6 +35,7 @@ const TABLE: Record<AgentCollection, string> = {
   meetings: "meetings",
   owner_notices: "owner_notices",
   lead_dossiers: "lead_dossiers",
+  site_builds: "site_builds",
 };
 
 /** Chave natural de cada coleção (o `id` em todas, exceto onde o contrato diz outra coisa). */

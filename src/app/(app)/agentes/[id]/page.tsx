@@ -15,6 +15,8 @@ import { MODE_BADGE, MODE_LABEL } from "@/features/agents/labels";
 import { NichePanel } from "@/features/agents/niche-panel";
 import { DossierList, PresenceConfigForm } from "@/features/presence/presence-panel";
 import { getPresencePanel } from "@/services/presence/panel";
+import { SiteBuildList, SiteBuilderConfigForm } from "@/features/sites/site-builder-panel";
+import { getSiteBuilderPanel } from "@/services/sites/panel";
 import { ProspectorPanel } from "@/features/agents/prospector-panel";
 import { EventList, TaskList } from "@/features/agents/task-list";
 import { getAgentDetail, getRunnerStatus } from "@/services/agents/overview";
@@ -40,6 +42,7 @@ export default async function AgentePage({ params }: { params: Promise<{ id: str
   const canAdmin = canAdminister(user.role);
   const canRun = canWrite(user.role);
   const presencePanel = id === "presence" ? await getPresencePanel() : null;
+  const sitePanel = id === "site-builder" ? await getSiteBuilderPanel() : null;
 
   return (
     <div>
@@ -74,6 +77,12 @@ export default async function AgentePage({ params }: { params: Promise<{ id: str
           />
         )}
 
+        {sitePanel && (
+          <>
+            <SiteBuildList data={sitePanel} canRun={canRun} />
+            <SiteBuilderConfigForm config={sitePanel.config} browserFound={sitePanel.browserFound} canAdmin={canAdmin} />
+          </>
+        )}
         {presencePanel && (
           <>
             <DossierList rows={presencePanel.rows} waiting={presencePanel.waiting} doneToday={presencePanel.doneToday} perDay={presencePanel.config.dossiers_per_day} canRun={canRun} />

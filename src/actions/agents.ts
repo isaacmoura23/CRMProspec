@@ -33,7 +33,9 @@ import { logActivity } from "@/services/activity";
 import { cancelPendingForLead, getConversationState, patchConversationState } from "@/services/conversation/state";
 import { whatsappGateway } from "@/services/whatsapp/config";
 import { DOSSIER_BUILD } from "@/services/presence/build";
-import { normalizePresenceConfig } from "@/agents/config";
+import { normalizePresenceConfig, normalizeSiteBuilderConfig } from "@/agents/config";
+import { SiteBuildGateError } from "@/lib/site-gate";
+import { discardSiteBuild, enqueueSiteBuild } from "@/services/sites/build";
 import { AGENT_MODES, isAgentId, type AgentId } from "@/types/agents";
 
 /**
@@ -211,6 +213,53 @@ export async function savePresenceConfig(input: unknown): Promise<ActionResult> 
   await logAgentEvent("presence", "info", "agent.config", `${admin.name} atualizou a configuração do Analista de Presença Digital.`);
   refresh();
   return ok("Configuração salva.");
+}
+
+const siteBuilderConfigSchema = z.object({
+  deadline_margin_hours: z.number().int().min(1).max(72),
+  keep_days_after_meeting: z.number().int().min(1).max(60),
+  require_browser_check: z.boolean(),
+});
+
+export async function saveSiteBuilderConfig(input: unknown): Promise<ActionResult> {
+  const admin = await getAdminUser();
+  if (!admin) return fail(ADMIN_DENIED);
+  const parsed = siteBuilderConfigSchema.safeParse(input);
+  if (!parsed.success) return fail("Configuração inválida. Revise os limites.");
+  await saveSettings("site-builder", { config: { ...normalizeSiteBuilderConfig(parsed.data) } });
+  await logAgentEvent("site-builder", "info", "agent.config", `${admin.name} atualizou a configuração do Programador de Sites.`);
+  refresh();
+  return ok("Configuração salva.");
+}
+
+/**
+ * Constrói a prévia do site de um lead agora. A porta é a mesma do agente: sem interesse
+ * explícito registrado e reunião futura, a resposta é a razão da recusa — não há atalho.
+ */
+export async function buildSiteNow(leadId: string): Promise<ActionResult> {
+  const user = await getWriterUser();
+  if (!user) return fail(WRITE_DENIED);
+  const blocked = await assertCanRun("site-builder");
+  if (blocked) return fail(blocked);
+  try {
+    const { created } = await enqueueSiteBuild(String(leadId), { createdBy: user.id, force: true });
+    refresh();
+    return ok(created ? "Prévia na fila. Fica pronta em instantes." : "Já existe uma prévia deste lead em andamento.");
+  } catch (err) {
+    if (err instanceof SiteBuildGateError) return fail(err.message);
+    throw err;
+  }
+}
+
+/** Tira a prévia do ar e apaga os arquivos. */
+export async function discardSitePreview(buildId: string): Promise<ActionResult> {
+  const user = await getWriterUser();
+  if (!user) return fail(WRITE_DENIED);
+  const build = await discardSiteBuild(String(buildId));
+  if (!build) return fail("Prévia não encontrada.");
+  await logAgentEvent("site-builder", "info", "site.discarded", `${user.name} tirou uma prévia do ar.`, { build_id: build.id });
+  refresh();
+  return ok("Prévia removida: o endereço deixou de abrir.");
 }
 
 /** Monta (ou refaz) o dossiê de um lead agora, sem esperar o planejador. */

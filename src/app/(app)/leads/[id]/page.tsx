@@ -24,6 +24,11 @@ import { ScoreBadge } from "@/components/score-badge";
 import { LeadHeaderActions } from "@/features/leads/lead-actions";
 import { DossierView } from "@/features/presence/dossier-view";
 import { getDossier } from "@/services/presence/build";
+import { LeadSiteCard } from "@/features/sites/lead-site-card";
+import { evaluateGate } from "@/services/sites/build";
+import { agentRepo } from "@/services/agents/repository";
+import { getCurrentUser } from "@/lib/auth";
+import { canWrite } from "@/lib/permissions";
 import { MessageGenerator } from "@/features/leads/message-generator";
 import { NotesPanel } from "@/features/leads/notes-panel";
 import { buildNextAction } from "@/features/leads/next-action";
@@ -56,7 +61,11 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
   const db = getDb();
   const lead = db.leads.find((l) => l.id === id);
   if (!lead) notFound();
+  const user = await getCurrentUser();
   const dossier = await getDossier(id);
+  const siteGate = (await evaluateGate(id)).gate;
+  const siteBuild = (await agentRepo().list("site_builds", { where: { lead_id: id }, orderBy: "created_at", desc: true, limit: 1 }))[0] ?? null;
+  const previewPath = siteBuild && siteBuild.status === "pronto" && siteBuild.expires_at && siteBuild.expires_at > new Date().toISOString() ? `/previa/${siteBuild.token}` : null;
 
   const analysis = db.lead_analysis.find((a) => a.lead_id === id);
   const scoreHistory = db.lead_score_history
@@ -326,6 +335,17 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
         <TabsContent value="dossie">
           <Card>
             <CardContent className="p-5">
+              <div className="mb-5">
+                <LeadSiteCard
+                  previewPath={previewPath}
+                  status={siteBuild?.status ?? null}
+                  readyAt={siteBuild?.ready_at ?? null}
+                  expiresAt={siteBuild?.expires_at ?? null}
+                  gateReason={siteGate.ok ? null : siteGate.reason}
+                  canRun={canWrite(user.role)}
+                  leadId={id}
+                />
+              </div>
               {dossier ? (
                 <DossierView dossier={dossier} />
               ) : (

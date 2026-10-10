@@ -42,6 +42,7 @@ export const KIND_LABEL: Record<string, string> = {
   "outreach.prepare": "Preparar abordagem",
   "conversation.respond": "Responder lead",
   "dossier.build": "Montar dossiê",
+  "site.build": "Construir prévia do site",
 };
 
 export function kindLabel(kind: string): string {

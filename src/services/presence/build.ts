@@ -13,7 +13,8 @@ import { confidenceOf, gatherSources, headlineProblem, isSyntheticLead, summaryO
 import { publicPageFetcher } from "@/services/presence/fetch";
 import { captureWithBrowser, findBrowser, isVisualAvailable, mergeVisual, reviewVisually, type CaptureFn, type VisionCall } from "@/services/presence/visual";
 import type { Lead } from "@/types";
-import type { LeadDossier } from "@/types/agents";
+import { cleanText, type SiteFacts } from "@/services/presence/parse";
+import type { DossierProfile, LeadDossier } from "@/types/agents";
 
 /**
  * Montagem do dossiê de um lead (Agente 3).
@@ -34,6 +35,49 @@ export interface BuildDeps {
   vision?: VisionCall;
 }
 
+/**
+ * Campos que o dossiê comprova, em formato que o Agente 5 usa para o site. Cada valor vem do
+ * cadastro do lead (Google Maps, quando a origem é o Places) ou do próprio site da empresa, e o
+ * campo `sources` diz de onde. Lead de demonstração não tem perfil.
+ */
+export function buildProfile(lead: Lead, facts: SiteFacts | null): DossierProfile | null {
+  if (isSyntheticLead(lead)) return null;
+  const sources: DossierProfile["sources"] = {};
+  const take = (key: string, value: string | null | undefined, from: "site" | "google_maps" | "cadastro", max = 300): string | null => {
+    const v = value ? cleanText(value, max) : "";
+    if (!v) return null;
+    sources[key] = from;
+    return v;
+  };
+  const maps = lead.source === "google_places";
+  const cadastro = maps ? "google_maps" : "cadastro";
+  const h1 = facts?.h1[0] ?? null;
+  const profile: DossierProfile = {
+    name: take("name", lead.company_name, cadastro, 120) ?? lead.company_name,
+    segment: take("segment", lead.segment, cadastro, 80),
+    city: take("city", lead.city, cadastro, 80),
+    tagline: take("tagline", h1 ?? facts?.title, "site", 120),
+    description: take("description", facts?.description, "site", 300),
+    headings: (facts?.h2 ?? []).map((h) => cleanText(h, 70)).filter(Boolean),
+    whatsapp: take("whatsapp", lead.whatsapp ?? facts?.whatsapp, lead.whatsapp ? cadastro : "site", 30),
+    phone: take("phone", lead.phone ?? facts?.phones[0], lead.phone ? cadastro : "site", 30),
+    email: take("email", facts?.email ?? lead.email, facts?.email ? "site" : cadastro, 120),
+    address: take("address", lead.address, cadastro, 200),
+    hours: take("hours", lead.opening_hours, cadastro, 160),
+    instagram: take("instagram", lead.instagram ?? facts?.links.instagram, lead.instagram ? cadastro : "site", 60),
+    facebook: take("facebook", lead.facebook ?? facts?.links.facebook, lead.facebook ? cadastro : "site", 60),
+    youtube: take("youtube", facts?.links.youtube[0], "site", 200),
+    maps_url: take("maps_url", lead.google_maps_url, cadastro, 300),
+    rating: maps && lead.rating ? Number(lead.rating) : null,
+    reviews: maps && lead.reviews_count ? Number(lead.reviews_count) : null,
+    theme_color: take("theme_color", facts?.themeColor, "site", 9),
+    sources,
+  };
+  if (profile.rating !== null) sources.rating = "google_maps";
+  if (profile.reviews !== null) sources.reviews = "google_maps";
+  return profile;
+}
+
 /** Junta o que foi coletado no registro do dossiê (puro, sem efeitos). */
 export function assembleDossier(lead: Lead, gathered: GatherResult, cfg: Pick<PresenceConfig, "refresh_days">, now: Date): LeadDossier {
   const synthetic = isSyntheticLead(lead);
@@ -50,6 +94,7 @@ export function assembleDossier(lead: Lead, gathered: GatherResult, cfg: Pick<Pr
     findings: gathered.findings,
     assessment: gathered.assessment,
     headline_problem: headline,
+    profile: buildProfile(lead, gathered.facts),
     summary: synthetic ? "Lead de demonstração: nenhuma fonte externa foi consultada." : summaryOf(gathered.sources, gathered.findings, headline),
     website_quality_before: lead.website_quality,
     website_quality_after: lead.website_quality,

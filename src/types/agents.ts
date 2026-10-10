@@ -3,7 +3,7 @@
  * Espelha database/migrations/0005_agentes.sql.
  * ============================================================ */
 
-export const AGENT_IDS = ["niche-analyst", "prospector", "presence", "seller"] as const;
+export const AGENT_IDS = ["niche-analyst", "prospector", "presence", "seller", "site-builder"] as const;
 export type AgentId = (typeof AGENT_IDS)[number];
 
 export function isAgentId(value: string): value is AgentId {
@@ -315,11 +315,47 @@ export interface Meeting {
 
 export type OwnerNoticeStatus = "pendente" | "enviado" | "falhou" | "incerto";
 
+/* ------------------------------------------------------------------ */
+/* Agente 5 — prévia do site                                           */
+/* ------------------------------------------------------------------ */
+
+export type SiteBuildStatus = "na_fila" | "construindo" | "verificando" | "pronto" | "falhou" | "cancelado";
+
+export interface SiteCheck {
+  name: string;
+  ok: boolean;
+  detail: string;
+}
+
+/** Uma prévia de site construída a partir do dossiê (e só depois de interesse explícito + reunião). */
+export interface SiteBuild {
+  id: string;
+  organization_id: string;
+  lead_id: string;
+  meeting_id: string | null;
+  status: SiteBuildStatus;
+  /** Quem fez: hoje só o gerador por modelos (determinístico, sem IA). */
+  builder: "modelos";
+  /** Endereço não adivinhável da prévia (/previa/<token>). */
+  token: string;
+  content_hash: string | null;
+  checks: SiteCheck[];
+  screenshots: string[];
+  error: string | null;
+  /** A prévia precisa estar pronta até aqui (reunião − 2 h). */
+  deadline_at: string | null;
+  cost_usd: number;
+  created_at: string;
+  updated_at: string;
+  ready_at: string | null;
+  expires_at: string | null;
+}
+
 /** Aviso ao WhatsApp pessoal do dono (hoje: reunião marcada). */
 export interface OwnerNotice {
   id: string;
   organization_id: string;
-  kind: "reuniao";
+  kind: "reuniao" | "previa";
   lead_id: string | null;
   meeting_id: string | null;
   phone: string;
@@ -391,6 +427,34 @@ export interface SiteAssessment {
   screenshots: Array<{ viewport: "desktop" | "mobile"; bytes: number }>;
 }
 
+/**
+ * O que o dossiê comprova, em campos que o Agente 5 pode usar para montar o site.
+ * Cada valor veio de uma fonte (`sources`): nada aqui é inventado nem estimado.
+ */
+export interface DossierProfile {
+  name: string;
+  segment: string | null;
+  city: string | null;
+  tagline: string | null;
+  description: string | null;
+  /** Seções do site atual (h2): a base da lista de serviços. */
+  headings: string[];
+  whatsapp: string | null;
+  phone: string | null;
+  email: string | null;
+  address: string | null;
+  hours: string | null;
+  instagram: string | null;
+  facebook: string | null;
+  youtube: string | null;
+  maps_url: string | null;
+  rating: number | null;
+  reviews: number | null;
+  theme_color: string | null;
+  /** De onde veio cada campo preenchido. */
+  sources: Record<string, "site" | "google_maps" | "cadastro">;
+}
+
 export interface LeadDossier {
   /** O id é o do lead: um dossiê por lead, refeito de tempos em tempos. */
   id: string;
@@ -404,6 +468,8 @@ export interface LeadDossier {
   assessment: SiteAssessment | null;
   /** Primeira frase do maior problema comprovado (alimenta a abordagem). */
   headline_problem: string | null;
+  /** Ausente em dossiês de demonstração e nos anteriores à fase 4: refaça o dossiê. */
+  profile?: DossierProfile | null;
   summary: string;
   website_quality_before: string;
   website_quality_after: string;
@@ -429,6 +495,7 @@ export interface AgentData {
   meetings: Meeting[];
   owner_notices: OwnerNotice[];
   lead_dossiers: LeadDossier[];
+  site_builds: SiteBuild[];
 }
 
 export function emptyAgentData(): AgentData {
@@ -449,5 +516,6 @@ export function emptyAgentData(): AgentData {
     meetings: [],
     owner_notices: [],
     lead_dossiers: [],
+    site_builds: [],
   };
 }

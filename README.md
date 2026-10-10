@@ -274,6 +274,12 @@ histórico) e a abordagem do Vendedor passa a falar do problema comprovado. Tela
 **/agentes/presence** e aba “Dossiê” em cada lead. A avaliação visual (capturas lidas por um
 modelo) é opcional e vem desligada.
 
+**Prévia do site (Agente 5):** quando um lead demonstra interesse de forma explícita e marca reunião, o
+Programador de Sites monta uma prévia do site **só com o que o dossiê comprova** (sem imagem, depoimento,
+preço nem endereço inventado), a verifica no navegador (erro de console, rolagem lateral no celular, capturas)
+e a deixa num endereço não adivinhável, fora dos buscadores, antes da reunião. Sem interesse registrado e
+reunião futura, nenhuma construção começa: é uma regra de código testada. Tela em **/agentes/site-builder**.
+
 **WhatsApp (gateway):** o número dedicado à prospecção é conectado por um
 gateway à parte (`npm run gateway`), que guarda a sessão num SQLite próprio e
 entrega o estado da conexão ao CRM por webhook assinado, com caixa de saída
@@ -291,7 +297,7 @@ completo, riscos e operação em [`docs/WHATSAPP_LOCAL.md`](docs/WHATSAPP_LOCAL.
 Sem `GOOGLE_PLACES_API_KEY` os agentes usam o diretório de demonstração e tudo
 que produzem é marcado como **dados de demonstração**.
 
-**Supabase:** rode `database/migrations/0005_agentes.sql`, `0006_whatsapp.sql`, `0007_vendedor.sql`, `0008_conversa.sql` e `0009_dossie.sql` (já estão em
+**Supabase:** rode `database/migrations/0005_agentes.sql`, `0006_whatsapp.sql`, `0007_vendedor.sql`, `0008_conversa.sql`, `0009_dossie.sql` e `0010_sites.sql` (já estão em
 `database/setup-producao.sql`) e confira com `node scripts/verificar-supabase.mjs`.
 Sem Supabase tudo funciona no `.data/db.json`.
 

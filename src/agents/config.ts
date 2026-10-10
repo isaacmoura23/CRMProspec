@@ -201,6 +201,38 @@ export function normalizeSellerConfig(raw: unknown): SellerConfig {
 }
 
 /* ------------------------------------------------------------------ */
+/* Agente 5 — Programador de sites                                     */
+/* ------------------------------------------------------------------ */
+
+export interface SiteBuilderConfig {
+  /** A prévia deve estar pronta esta quantidade de horas antes da reunião; sem tempo, o agente avisa em vez de entregar pela metade. */
+  deadline_margin_hours: number;
+  /** Dias que a prévia continua no ar depois da reunião (depois disso o endereço deixa de abrir). */
+  keep_days_after_meeting: number;
+  /**
+   * Exige o navegador (Chrome/Edge) na verificação: capturas, erro de console e rolagem lateral no celular.
+   * Sem ele a prévia não é entregue — só checagens de arquivo não bastam.
+   */
+  require_browser_check: boolean;
+}
+
+export const SITE_BUILDER_DEFAULTS: SiteBuilderConfig = {
+  deadline_margin_hours: 2,
+  keep_days_after_meeting: 7,
+  require_browser_check: true,
+};
+
+export function normalizeSiteBuilderConfig(raw: unknown): SiteBuilderConfig {
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const d = SITE_BUILDER_DEFAULTS;
+  return {
+    deadline_margin_hours: clampInt(r.deadline_margin_hours, 1, 72, d.deadline_margin_hours),
+    keep_days_after_meeting: clampInt(r.keep_days_after_meeting, 1, 60, d.keep_days_after_meeting),
+    require_browser_check: r.require_browser_check === undefined ? d.require_browser_check : r.require_browser_check !== false,
+  };
+}
+
+/* ------------------------------------------------------------------ */
 /* Agente 3 — Analista de Presença Digital                             */
 /* ------------------------------------------------------------------ */
 

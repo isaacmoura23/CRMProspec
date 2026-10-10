@@ -30,6 +30,7 @@ const AGENT_LABEL: Record<string, string> = {
   prospector: "Prospectador",
   seller: "Vendedor",
   presence: "Analista de Presença",
+  "site-builder": "Programador de Sites",
 };
 
 /** Mensagem de WhatsApp: o dono lê o texto exato, pode editar e só então aprova. */

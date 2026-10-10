@@ -5,10 +5,12 @@ import {
   normalizePresenceConfig,
   normalizeProspectorConfig,
   normalizeSellerConfig,
+  normalizeSiteBuilderConfig,
   type NicheAnalystConfig,
   type PresenceConfig,
   type ProspectorConfig,
   type SellerConfig,
+  type SiteBuilderConfig,
 } from "@/agents/config";
 import { agentRepo, orgId } from "@/services/agents/repository";
 import { AGENT_IDS, GLOBAL_SETTINGS_ID, type AgentId, type AgentMode, type AgentSettingsRow } from "@/types/agents";
@@ -79,6 +81,10 @@ export async function getNicheAnalystConfig(): Promise<NicheAnalystConfig> {
 
 export async function getSellerConfig(): Promise<SellerConfig> {
   return normalizeSellerConfig((await getSettingsRow("seller")).config);
+}
+
+export async function getSiteBuilderConfig(): Promise<SiteBuilderConfig> {
+  return normalizeSiteBuilderConfig((await getSettingsRow("site-builder")).config);
 }
 
 export async function getPresenceConfig(): Promise<PresenceConfig> {
