@@ -67,16 +67,16 @@ describe("interruptor geral e modos", () => {
 
   it("por padrão está ligado e cada agente nasce em aprovação", async () => {
     assert.equal(await isGloballyEnabled(), true);
-    assert.deepEqual(await runnableAgents(), ["niche-analyst", "prospector", "presence", "seller", "site-builder"]);
+    assert.deepEqual(await runnableAgents(), ["niche-analyst", "prospector", "presence", "seller", "site-builder", "traffic-manager", "social-media"]);
   });
 
   it("desligar o geral para todos; pausar um agente tira só ele", async () => {
     await saveSettings("prospector", { mode: "pausado" });
-    assert.deepEqual(await runnableAgents(), ["niche-analyst", "presence", "seller", "site-builder"]);
+    assert.deepEqual(await runnableAgents(), ["niche-analyst", "presence", "seller", "site-builder", "traffic-manager", "social-media"]);
     await setGloballyEnabled(false);
     assert.deepEqual(await runnableAgents(), []);
     await setGloballyEnabled(true);
-    assert.deepEqual(await runnableAgents(), ["niche-analyst", "presence", "seller", "site-builder"]);
+    assert.deepEqual(await runnableAgents(), ["niche-analyst", "presence", "seller", "site-builder", "traffic-manager", "social-media"]);
   });
 
   it("tarefa de agente pausado fica na fila e o runner não a executa", async () => {
@@ -174,7 +174,12 @@ describe("aprovação", () => {
 });
 
 describe("planejador", () => {
-  beforeEach(reset);
+  // Aqui o foco são os Agentes 1 e 2: os que propõem posts e campanhas ficam pausados.
+  beforeEach(async () => {
+    reset();
+    await saveSettings("social-media", { mode: "pausado" });
+    await saveSettings("traffic-manager", { mode: "pausado" });
+  });
 
   it("sem cidade configurada o Analista de Nicho não propõe nada", async () => {
     const r = await planAgents();

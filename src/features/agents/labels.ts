@@ -43,6 +43,9 @@ export const KIND_LABEL: Record<string, string> = {
   "conversation.respond": "Responder lead",
   "dossier.build": "Montar dossiê",
   "site.build": "Construir prévia do site",
+  "social.propose": "Propor post do Instagram",
+  "ads.propose": "Propor rascunho de campanha",
+  "ads.review": "Revisar campanhas ativas",
 };
 
 export function kindLabel(kind: string): string {

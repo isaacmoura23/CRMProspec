@@ -17,6 +17,9 @@ import { DossierList, PresenceConfigForm } from "@/features/presence/presence-pa
 import { getPresencePanel } from "@/services/presence/panel";
 import { SiteBuildList, SiteBuilderConfigForm } from "@/features/sites/site-builder-panel";
 import { getSiteBuilderPanel } from "@/services/sites/panel";
+import { SocialConfigForm, SocialPanel } from "@/features/growth/social-panel";
+import { CampaignList, SpendSummaryCard, TrafficConfigForm } from "@/features/growth/traffic-panel";
+import { getSocialPanel, getTrafficPanel } from "@/services/growth/panel";
 import { ProspectorPanel } from "@/features/agents/prospector-panel";
 import { EventList, TaskList } from "@/features/agents/task-list";
 import { getAgentDetail, getRunnerStatus } from "@/services/agents/overview";
@@ -43,6 +46,8 @@ export default async function AgentePage({ params }: { params: Promise<{ id: str
   const canRun = canWrite(user.role);
   const presencePanel = id === "presence" ? await getPresencePanel() : null;
   const sitePanel = id === "site-builder" ? await getSiteBuilderPanel() : null;
+  const socialPanel = id === "social-media" ? await getSocialPanel() : null;
+  const trafficPanel = id === "traffic-manager" ? await getTrafficPanel() : null;
 
   return (
     <div>
@@ -77,6 +82,32 @@ export default async function AgentePage({ params }: { params: Promise<{ id: str
           />
         )}
 
+        {socialPanel && (
+          <>
+            <SocialPanel posts={socialPanel.posts} instagramConfigured={socialPanel.instagramConfigured} canDecide={canAdmin} canRun={canRun} />
+            {!socialPanel.instagramConfigured && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Ligar o Instagram</CardTitle>
+                  <CardDescription>Precisa de uma conta Instagram Business ligada a uma página do Facebook e de um token de longa duração da API Graph da Meta.</CardDescription>
+                </CardHeader>
+                <div className="space-y-2 px-5 pb-5 text-[13px] text-muted-foreground">
+                  <p>
+                    Rode <code className="rounded bg-surface px-1">node scripts/set-instagram-token.mjs</code> num terminal: ele pede o ID da conta e o token (digitado sem aparecer na tela) e grava no <code className="rounded bg-surface px-1">.env.local</code>. Nunca cole o token no chat. Reinicie o servidor depois.
+                  </p>
+                </div>
+              </Card>
+            )}
+            <SocialConfigForm config={socialPanel.config} canAdmin={canAdmin} />
+          </>
+        )}
+        {trafficPanel && (
+          <>
+            <SpendSummaryCard summary={trafficPanel.summary} />
+            <CampaignList rows={trafficPanel.rows} canDecide={canAdmin} canRun={canRun} />
+            <TrafficConfigForm config={trafficPanel.config} canAdmin={canAdmin} />
+          </>
+        )}
         {sitePanel && (
           <>
             <SiteBuildList data={sitePanel} canRun={canRun} />

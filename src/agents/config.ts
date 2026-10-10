@@ -201,6 +201,65 @@ export function normalizeSellerConfig(raw: unknown): SellerConfig {
 }
 
 /* ------------------------------------------------------------------ */
+/* Agente 6 — Gestor de tráfego                                        */
+/* ------------------------------------------------------------------ */
+
+export interface TrafficConfig {
+  /** Teto de gasto por dia (centavos): a soma dos orçamentos diários das campanhas ativas nunca passa disto. */
+  daily_cap_cents: number;
+  /** Teto de gasto por mês (centavos): o gasto do mês mais o previsto das ativas nunca passa disto. */
+  monthly_cap_cents: number;
+  /** Rascunhos de campanha esperando ao mesmo tempo. */
+  max_pending_campaigns: number;
+}
+
+export const TRAFFIC_DEFAULTS: TrafficConfig = {
+  daily_cap_cents: 3_000,
+  monthly_cap_cents: 60_000,
+  max_pending_campaigns: 3,
+};
+
+export function normalizeTrafficConfig(raw: unknown): TrafficConfig {
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const d = TRAFFIC_DEFAULTS;
+  const daily = clampInt(r.daily_cap_cents, 0, 10_000_000, d.daily_cap_cents);
+  // O teto do mês nunca fica abaixo de um dia de gasto: seria um teto que impede ativar qualquer coisa sem aviso.
+  return {
+    daily_cap_cents: daily,
+    monthly_cap_cents: Math.max(daily, clampInt(r.monthly_cap_cents, 0, 1_000_000_000, d.monthly_cap_cents)),
+    max_pending_campaigns: clampInt(r.max_pending_campaigns, 1, 20, d.max_pending_campaigns),
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* Agente 7 — Mídias sociais                                           */
+/* ------------------------------------------------------------------ */
+
+export interface SocialConfig {
+  /** Propostas de post esperando ao mesmo tempo. */
+  max_pending_posts: number;
+  /** Dias até uma proposta sem decisão expirar. */
+  proposal_ttl_days: number;
+  /** Hashtags que entram no fim da legenda (sem o "#"; até 8). */
+  hashtags: string[];
+}
+
+export const SOCIAL_DEFAULTS: SocialConfig = { max_pending_posts: 3, proposal_ttl_days: 2, hashtags: [] };
+
+export function normalizeSocialConfig(raw: unknown): SocialConfig {
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const d = SOCIAL_DEFAULTS;
+  const tags = Array.isArray(r.hashtags)
+    ? [...new Set(r.hashtags.map((t) => String(t).replace(/^#+/, "").replace(/[^\p{L}\p{N}_]/gu, "").slice(0, 30)).filter(Boolean))].slice(0, 8)
+    : d.hashtags;
+  return {
+    max_pending_posts: clampInt(r.max_pending_posts, 1, 10, d.max_pending_posts),
+    proposal_ttl_days: clampInt(r.proposal_ttl_days, 1, 14, d.proposal_ttl_days),
+    hashtags: tags,
+  };
+}
+
+/* ------------------------------------------------------------------ */
 /* Agente 5 — Programador de sites                                     */
 /* ------------------------------------------------------------------ */
 

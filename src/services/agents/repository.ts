@@ -36,6 +36,9 @@ const TABLE: Record<AgentCollection, string> = {
   owner_notices: "owner_notices",
   lead_dossiers: "lead_dossiers",
   site_builds: "site_builds",
+  social_posts: "social_posts",
+  ad_campaigns: "ad_campaigns",
+  ad_reports: "ad_reports",
 };
 
 /** Chave natural de cada coleção (o `id` em todas, exceto onde o contrato diz outra coisa). */
@@ -82,6 +85,13 @@ export interface AgentRepo {
    * leva (agendado → reivindicado). Dois processadores nunca enviam o mesmo ciclo.
    */
   claimOutreachCycle(id: string): Promise<OutreachCycle | null>;
+
+  /**
+   * Troca atômica de estado: aplica `patch` só se a linha ainda está em `from`. Quem não leva
+   * recebe `null`. É o que impede dois cliques seguidos de publicar o mesmo post ou ativar a
+   * mesma campanha duas vezes.
+   */
+  claimStatus<K extends AgentCollection>(col: K, id: string, from: string, patch: Partial<RowOf<K>>): Promise<RowOf<K> | null>;
 }
 
 function nowIso() {
@@ -306,6 +316,16 @@ class LocalAgentRepo implements AgentRepo {
     return true;
   }
 
+  async claimStatus<K extends AgentCollection>(col: K, id: string, from: string, patch: Partial<RowOf<K>>) {
+    // Sem nenhum `await` entre ler e gravar: dois chamadores nunca passam juntos.
+    const org = orgId();
+    const row = this.rows(col).find((r) => keyOf(col, r) === id && (r as unknown as { organization_id: string }).organization_id === org);
+    if (!row || (row as unknown as { status?: string }).status !== from) return null;
+    Object.assign(row, patch);
+    this.persist(col);
+    return row;
+  }
+
   async claimOutreachCycle(id: string) {
     const cycle = this.rows("outreach_cycles").find((c) => c.id === id && c.organization_id === orgId());
     if (!cycle || cycle.status !== "agendado") return null;
@@ -471,6 +491,18 @@ class SupabaseAgentRepo implements AgentRepo {
       .select("id");
     if (error) throw error;
     return (data?.length ?? 0) === 1;
+  }
+
+  async claimStatus<K extends AgentCollection>(col: K, id: string, from: string, patch: Partial<RowOf<K>>) {
+    const { data, error } = await this.sb()
+      .from(TABLE[col])
+      .update(patch as Record<string, unknown>)
+      .eq("organization_id", orgId())
+      .eq(this.key(col), id)
+      .eq("status", from)
+      .select();
+    if (error) throw error;
+    return data && data.length === 1 ? (data[0] as RowOf<K>) : null;
   }
 
   async claimOutreachCycle(id: string) {

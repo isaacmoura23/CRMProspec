@@ -6,11 +6,15 @@ import {
   normalizeProspectorConfig,
   normalizeSellerConfig,
   normalizeSiteBuilderConfig,
+  normalizeSocialConfig,
+  normalizeTrafficConfig,
   type NicheAnalystConfig,
   type PresenceConfig,
   type ProspectorConfig,
   type SellerConfig,
   type SiteBuilderConfig,
+  type SocialConfig,
+  type TrafficConfig,
 } from "@/agents/config";
 import { agentRepo, orgId } from "@/services/agents/repository";
 import { AGENT_IDS, GLOBAL_SETTINGS_ID, type AgentId, type AgentMode, type AgentSettingsRow } from "@/types/agents";
@@ -81,6 +85,14 @@ export async function getNicheAnalystConfig(): Promise<NicheAnalystConfig> {
 
 export async function getSellerConfig(): Promise<SellerConfig> {
   return normalizeSellerConfig((await getSettingsRow("seller")).config);
+}
+
+export async function getTrafficConfig(): Promise<TrafficConfig> {
+  return normalizeTrafficConfig((await getSettingsRow("traffic-manager")).config);
+}
+
+export async function getSocialConfig(): Promise<SocialConfig> {
+  return normalizeSocialConfig((await getSettingsRow("social-media")).config);
 }
 
 export async function getSiteBuilderConfig(): Promise<SiteBuilderConfig> {

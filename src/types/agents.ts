@@ -3,7 +3,7 @@
  * Espelha database/migrations/0005_agentes.sql.
  * ============================================================ */
 
-export const AGENT_IDS = ["niche-analyst", "prospector", "presence", "seller", "site-builder"] as const;
+export const AGENT_IDS = ["niche-analyst", "prospector", "presence", "seller", "site-builder", "traffic-manager", "social-media"] as const;
 export type AgentId = (typeof AGENT_IDS)[number];
 
 export function isAgentId(value: string): value is AgentId {
@@ -137,7 +137,7 @@ export interface Approval {
    * O que se aprova: uma tarefa de agente, ou uma mensagem de WhatsApp antes de
    * sair (aqui o pedido carrega o texto exato que será enviado).
    */
-  kind: "agent_task" | "outreach_message" | "conversation_reply";
+  kind: "agent_task" | "outreach_message" | "conversation_reply" | "social_post" | "ad_campaign" | "ad_budget_change";
   title: string;
   detail: string | null;
   /**
@@ -478,6 +478,95 @@ export interface LeadDossier {
   valid_until: string;
 }
 
+/* ------------------------------------------------------------------ */
+/* Agente 7 — Mídias sociais (Instagram)                               */
+/* ------------------------------------------------------------------ */
+
+/** rascunho → pendente → aprovado → publicando → publicado | falhou; recusado e expirado encerram sem publicar. */
+export type SocialPostStatus = "rascunho" | "pendente" | "aprovado" | "publicando" | "publicado" | "falhou" | "recusado" | "expirado";
+
+export interface SocialPost {
+  id: string;
+  organization_id: string;
+  platform: "instagram";
+  /** A pauta do dia, em uma linha. */
+  topic: string;
+  caption: string;
+  /** Endereço público (https) da imagem; sem ele o post não pode ser publicado. */
+  image_url: string | null;
+  /** O que a imagem deveria mostrar (o agente sugere; quem fornece a imagem é você). */
+  image_idea: string;
+  status: SocialPostStatus;
+  approval_id: string | null;
+  /** Vai à rotina de publicação: o mesmo post nunca publica duas vezes. */
+  idempotency_key: string;
+  external_id: string | null;
+  permalink: string | null;
+  error: string | null;
+  /** A publicação ficou sem confirmação (pode ter saído): exige conferência, nunca repete sozinha. */
+  uncertain: boolean;
+  /** Você mudou o texto sugerido. */
+  edited: boolean;
+  approved_by: string | null;
+  approved_at: string | null;
+  published_at: string | null;
+  created_at: string;
+  updated_at: string;
+  expires_at: string;
+}
+
+/* ------------------------------------------------------------------ */
+/* Agente 6 — Gestor de tráfego                                        */
+/* ------------------------------------------------------------------ */
+
+/** Toda campanha nasce rascunho; ativar e aumentar orçamento exigem clique, dentro dos tetos. */
+export type AdCampaignStatus = "rascunho" | "pendente" | "aprovado" | "ativa" | "pausada" | "encerrada" | "recusada" | "expirada" | "falhou";
+
+export interface AdCampaign {
+  id: string;
+  organization_id: string;
+  name: string;
+  objective: "mensagens" | "trafego" | "reconhecimento" | "leads";
+  /** `manual`: sem plataforma ligada, você cria a campanha lá e o CRM guarda o controle. */
+  platform: "manual" | "meta" | "google";
+  status: AdCampaignStatus;
+  /** Em centavos, para não somar ponto flutuante com dinheiro. */
+  daily_budget_cents: number;
+  start_date: string;
+  end_date: string | null;
+  audience: string;
+  headline: string;
+  body: string;
+  cta: string;
+  landing_url: string | null;
+  approval_id: string | null;
+  external_id: string | null;
+  idempotency_key: string;
+  error: string | null;
+  approved_by: string | null;
+  approved_at: string | null;
+  activated_by: string | null;
+  activated_at: string | null;
+  created_at: string;
+  updated_at: string;
+  expires_at: string;
+}
+
+/** Desempenho de uma campanha em um dia (lido do provedor ou lançado à mão). */
+export interface AdReport {
+  /** `<campanha>:<dia>`: um registro por campanha por dia. */
+  id: string;
+  organization_id: string;
+  campaign_id: string;
+  day: string;
+  impressions: number;
+  clicks: number;
+  spend_cents: number;
+  conversions: number;
+  source: "manual" | "provider";
+  created_at: string;
+}
+
 export interface AgentData {
   settings: AgentSettingsRow[];
   tasks: AgentTask[];
@@ -496,6 +585,9 @@ export interface AgentData {
   owner_notices: OwnerNotice[];
   lead_dossiers: LeadDossier[];
   site_builds: SiteBuild[];
+  social_posts: SocialPost[];
+  ad_campaigns: AdCampaign[];
+  ad_reports: AdReport[];
 }
 
 export function emptyAgentData(): AgentData {
@@ -517,5 +609,8 @@ export function emptyAgentData(): AgentData {
     owner_notices: [],
     lead_dossiers: [],
     site_builds: [],
+    social_posts: [],
+    ad_campaigns: [],
+    ad_reports: [],
   };
 }

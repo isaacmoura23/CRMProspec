@@ -294,6 +294,43 @@ retomar sem precisar reconstruir o contexto.
 - **Não verificado:** a migração `0010` no Supabase e o comportamento com sites reais de clientes (o teste ao vivo
   usou um site público de exemplo, com pouco conteúdo).
 
+### AgentOS: Mídias Sociais e Gestor de Tráfego — fase 5 (11/10/2026)
+- **A regra, em código e provada por teste:** nenhuma publicação nem alteração de gasto sem clique. As ferramentas
+  que mexem fora do CRM (`instagram.publish_media`, criar/ativar/pausar campanha, ajustar orçamento) estão em
+  `HUMAN_ONLY_TOOLS`, **fora da lista de qualquer agente** (`src/agents/tools.ts`); um teste confere que (a) nenhum
+  agente as recebe, (b) o código dos agentes não importa nem cita as funções de publicar/ativar/pausar/ajustar, e
+  (c) o módulo de publicar (`instagram-publisher.ts`) só é importado pelo serviço que a ação do botão chama. Outro
+  teste roda os dois agentes em modo **automático**, com o Instagram configurado, e prova que não houve nenhuma
+  chamada de escrita à API e que nenhuma campanha foi ativada.
+- **Agente 7 — Mídias Sociais** (`src/agents/social/`): uma proposta por dia (pauta, legenda e ideia de imagem) só
+  com fatos do perfil da empresa, sem repetir pauta recente (olha também os posts publicados quando o Instagram
+  está ligado). Legenda passa por barreiras (sem link, sem promessa, sem frase proibida, tamanho, hashtags). Estados:
+  rascunho → pendente → aprovado → publicando → publicado | falhou, mais recusado e expirado. **"Aprovar e
+  publicar"** (`approveAndPublish`) é a única passagem que publica: reivindica o post de forma **atômica** (dois
+  cliques ou duas abas publicam uma vez só), confere legenda e imagem, e só então chama a API Graph. Falha definitiva
+  pode ser reaberta para um novo clique; **sem confirmação vira "incerta"** (nunca se repete sozinha: conferir no
+  Instagram ou marcar que não saiu). Editar legenda e imagem antes de aprovar. Aprovar um post pela fila genérica
+  de aprovação **não** publica.
+- **Agente 6 — Gestor de Tráfego** (`src/agents/traffic/`): um rascunho de campanha por semana, e uma revisão diária
+  dos relatórios que **só propõe** pausar o que gasta sem converter ou tudo o que passou do teto (e avisa no sino).
+  Toda campanha nasce rascunho em `approvals`; **aprovar o rascunho não gasta nada, ativar é outro clique**. Ativar
+  e subir orçamento conferem os **tetos diário e mensal** no servidor (soma dos orçamentos ativos; gasto do mês +
+  previsto até o fim do mês) e são atômicos. Dinheiro em centavos. Provedor **manual**: você cria a campanha na
+  plataforma e o CRM guarda o controle, os tetos e os relatórios (lançados à mão).
+- Telas `/agentes/social-media` (posts, edição, imagem, conferência de incertos, configuração e passo a passo do
+  Instagram) e `/agentes/traffic-manager` (gasto e tetos, campanhas, relatório do dia, tetos configuráveis).
+  `scripts/set-instagram-token.mjs` grava ID e token sem expor o token. Migração `0011_social_trafego.sql`
+  (já no `setup-producao.sql` e no verificador).
+- Testes: `npm test` (461), `tsc`, `lint` e `build` limpos.
+- **Desvios da especificação:** o Instagram é falado direto pela API Graph (HTTP, com o token no cabeçalho), não por
+  um servidor MCP Python (`ig-mcp`) — a garantia é a mesma e não há processo extra; o AdKit é um serviço pago e
+  hospedado cujo protocolo não dá para verificar daqui, então o Agente 6 entrega o núcleo (rascunhos, aprovação,
+  tetos, relatórios) com o provedor manual, e as plataformas entram atrás da mesma interface quando houver conta;
+  a imagem do post é um endereço público que VOCÊ informa (o agente sugere a ideia, não gera imagem).
+- **Não verificado:** publicar de verdade no Instagram (não há conta Business nem token neste ambiente: o cliente HTTP
+  e os dois passos da API foram verificados contra simulações), a leitura real do perfil e dos posts, e a migração
+  `0011` no Supabase.
+
 ## Pela metade — Supabase
 
 Objetivo: em produção o banco vive na memória da instância, então leads

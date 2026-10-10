@@ -4,6 +4,8 @@ import type { PlannedTask } from "@/agents/types";
 import { checkReply } from "@/lib/conversation-policy";
 import { checkMessage, withOptOutFooter } from "@/lib/outreach-policy";
 import { getDb } from "@/lib/store";
+import { applyBudgetChange, approveCampaignDraft, rejectCampaignDraft } from "@/services/ads/campaigns";
+import { rejectPost } from "@/services/social/posts";
 import { logAgentEvent } from "@/services/agents/log";
 import { createOutreachCycle } from "@/services/outreach/cycles";
 import { enqueueAgentTask } from "@/services/agents/queue";
@@ -94,6 +96,10 @@ export async function decideApproval(id: string, approve: boolean, userId: strin
   }
 
   if (!approve) {
+    // Recusar também encerra a coisa por trás do pedido (o post, a campanha).
+    const target = (approval.payload as { post_id?: string; campaign_id?: string });
+    if (approval.kind === "social_post" && target.post_id) await rejectPost(target.post_id, userId);
+    if (approval.kind === "ad_campaign" && target.campaign_id) await rejectCampaignDraft(target.campaign_id, userId);
     const updated = await repo.update("approvals", id, { status: "recusado", decided_by: userId, decided_at: now });
     await logAgentEvent(approval.agent, "info", "approval.rejected", `Recusado: ${approval.title}.`);
     return { ok: true, approval: updated ?? approval };
@@ -102,6 +108,22 @@ export async function decideApproval(id: string, approve: boolean, userId: strin
   // Mensagem de WhatsApp: aprovar cria o ciclo de envio com o texto exato (editado ou não).
   if (approval.kind === "outreach_message") return approveOutreachMessage(approval, userId, now, opts.editedBody);
   if (approval.kind === "conversation_reply") return approveConversationReply(approval, userId, now, opts.editedBody);
+  // Publicar no Instagram não passa por aqui: só o botão "Aprovar e publicar" do post (que também confere a imagem).
+  if (approval.kind === "social_post") return { ok: false, error: "Para um post, use “Aprovar e publicar” no próprio post: ele confere a imagem e publica no mesmo clique." };
+  if (approval.kind === "ad_campaign") {
+    const campaignId = (approval.payload as { campaign_id?: string }).campaign_id;
+    if (!campaignId) return { ok: false, error: "Pedido sem campanha." };
+    const r = await approveCampaignDraft(campaignId, userId, new Date(now));
+    if (!r.ok) return { ok: false, error: r.error };
+    return { ok: true, approval: (await repo.get("approvals", id)) ?? approval };
+  }
+  if (approval.kind === "ad_budget_change") {
+    const r = await applyBudgetChange(approval.payload as { campaign_id: string; action: string; to_cents: number | null }, userId, new Date(now));
+    if (!r.ok) return { ok: false, error: r.error };
+    const updated = await repo.update("approvals", id, { status: "aprovado", decided_by: userId, decided_at: now });
+    await logAgentEvent("traffic-manager", "info", "approval.approved", `Aprovado: ${approval.title}`);
+    return { ok: true, approval: updated ?? approval };
+  }
 
   const spec = approval.payload as { agent?: AgentId; kind?: string; payload?: Record<string, unknown>; dedupeKey?: string };
   if (!spec.agent || !spec.kind) return { ok: false, error: "Pedido sem tarefa associada." };

@@ -4,6 +4,8 @@ import { presence, registerPresenceHandlers } from "@/agents/presence/agent";
 import { prospector, registerProspectorHandlers } from "@/agents/prospector/agent";
 import { registerSiteBuilderHandlers, siteBuilder } from "@/agents/site-builder/agent";
 import { registerSellerHandlers, seller } from "@/agents/seller/agent";
+import { registerSocialHandlers, socialMedia } from "@/agents/social/agent";
+import { registerTrafficHandlers, trafficManager } from "@/agents/traffic/agent";
 import type { AgentDefinition } from "@/agents/types";
 import { isAgentId, type AgentId } from "@/types/agents";
 
@@ -11,7 +13,7 @@ import { isAgentId, type AgentId } from "@/types/agents";
  * Registro dos agentes, no estilo de `providers/registry.ts`. Um agente novo
  * entra aqui (definição + handlers) e na lista de `AGENT_IDS`.
  */
-export const AGENTS: AgentDefinition[] = [nicheAnalyst, prospector, presence, seller, siteBuilder];
+export const AGENTS: AgentDefinition[] = [nicheAnalyst, prospector, presence, seller, siteBuilder, trafficManager, socialMedia];
 
 export function getAgent(id: string): AgentDefinition | undefined {
   return isAgentId(id) ? AGENTS.find((a) => a.id === id) : undefined;
@@ -32,5 +34,7 @@ export function registerAgentHandlers() {
   registerPresenceHandlers();
   registerSellerHandlers();
   registerSiteBuilderHandlers();
+  registerTrafficHandlers();
+  registerSocialHandlers();
   g.__agentsRegistered = true;
 }

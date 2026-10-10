@@ -31,6 +31,8 @@ const AGENT_LABEL: Record<string, string> = {
   seller: "Vendedor",
   presence: "Analista de Presença",
   "site-builder": "Programador de Sites",
+  "traffic-manager": "Gestor de Tráfego",
+  "social-media": "Mídias Sociais",
 };
 
 /** Mensagem de WhatsApp: o dono lê o texto exato, pode editar e só então aprova. */
@@ -95,6 +97,35 @@ function OutreachApprovalItem({ approval: a, canDecide, busy, onDecide }: { appr
   );
 }
 
+/** Post e campanha são decididos na tela do próprio agente (lá estão a edição, a imagem e os tetos); aqui só o aviso e a recusa. */
+function LinkedApprovalItem({ approval: a, canDecide, busy, onReject }: { approval: Approval; canDecide: boolean; busy: boolean; onReject: () => void }) {
+  const href = a.kind === "social_post" ? "/agentes/social-media" : "/agentes/traffic-manager";
+  return (
+    <li className="flex flex-wrap items-center gap-3 px-5 py-3">
+      <div className="min-w-0 flex-1 space-y-0.5">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm font-medium">{a.title}</span>
+          <Badge variant="outline">{AGENT_LABEL[a.agent] ?? a.agent}</Badge>
+        </div>
+        {a.detail && <p className="text-[13px] text-muted-foreground">{a.detail}</p>}
+        <p className="text-xs text-faint-foreground">
+          {a.kind === "social_post" ? "Só sai com o seu clique em “Aprovar e publicar”." : "Aprovar o rascunho não gasta nada: ativar é outro clique."} · expira em {formatDateTime(a.expires_at)}
+        </p>
+      </div>
+      <div className="flex gap-2">
+        <a href={href} className="inline-flex h-8 items-center rounded-md bg-primary px-3 text-[13px] font-medium text-primary-foreground hover:opacity-90">
+          Revisar
+        </a>
+        {canDecide && (
+          <Button size="sm" variant="secondary" disabled={busy} onClick={onReject}>
+            <X /> Recusar
+          </Button>
+        )}
+      </div>
+    </li>
+  );
+}
+
 export function ApprovalsView({
   pending,
   history,
@@ -126,7 +157,9 @@ export function ApprovalsView({
         ) : (
           <ul className="divide-y divide-border">
             {pending.map((a) =>
-              a.kind === "outreach_message" || a.kind === "conversation_reply" ? (
+              a.kind === "social_post" || a.kind === "ad_campaign" ? (
+                <LinkedApprovalItem key={a.id} approval={a} canDecide={canDecide} busy={busy} onReject={() => run(() => decideAgentApproval(a.id, false))} />
+              ) : a.kind === "outreach_message" || a.kind === "conversation_reply" ? (
                 <OutreachApprovalItem key={a.id} approval={a} canDecide={canDecide} busy={busy} onDecide={(approve, editedBody) => run(() => decideAgentApproval(a.id, approve, editedBody))} />
               ) : (
               <li key={a.id} className="flex flex-wrap items-center gap-3 px-5 py-3">

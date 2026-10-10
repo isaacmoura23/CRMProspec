@@ -280,6 +280,15 @@ preço nem endereço inventado), a verifica no navegador (erro de console, rolag
 e a deixa num endereço não adivinhável, fora dos buscadores, antes da reunião. Sem interesse registrado e
 reunião futura, nenhuma construção começa: é uma regra de código testada. Tela em **/agentes/site-builder**.
 
+**Mídias Sociais e Tráfego (Agentes 7 e 6):** o agente de Mídias Sociais propõe, uma vez por dia, um post
+para o Instagram (pauta, legenda e a ideia da imagem) a partir do perfil da empresa; o de Tráfego propõe
+rascunhos de campanha e sugere pausar o que gasta sem resultado. **Nada sai sem o seu clique:** publicar é
+"Aprovar e publicar" no próprio post, e uma campanha nasce rascunho — aprovar o rascunho não gasta nada, ativar
+é outro clique, conferido contra os **tetos de gasto diário e mensal** no servidor. As ferramentas que mexem
+fora do CRM (publicar, ativar, pausar, ajustar orçamento) não estão na lista de nenhum agente, e testes provam
+isso. Telas em **/agentes/social-media** e **/agentes/traffic-manager**; para ligar o Instagram use
+`node scripts/set-instagram-token.mjs`.
+
 **WhatsApp (gateway):** o número dedicado à prospecção é conectado por um
 gateway à parte (`npm run gateway`), que guarda a sessão num SQLite próprio e
 entrega o estado da conexão ao CRM por webhook assinado, com caixa de saída
@@ -297,7 +306,7 @@ completo, riscos e operação em [`docs/WHATSAPP_LOCAL.md`](docs/WHATSAPP_LOCAL.
 Sem `GOOGLE_PLACES_API_KEY` os agentes usam o diretório de demonstração e tudo
 que produzem é marcado como **dados de demonstração**.
 
-**Supabase:** rode `database/migrations/0005_agentes.sql`, `0006_whatsapp.sql`, `0007_vendedor.sql`, `0008_conversa.sql`, `0009_dossie.sql` e `0010_sites.sql` (já estão em
+**Supabase:** rode `database/migrations/0005_agentes.sql`, `0006_whatsapp.sql`, `0007_vendedor.sql`, `0008_conversa.sql`, `0009_dossie.sql`, `0010_sites.sql` e `0011_social_trafego.sql` (já estão em
 `database/setup-producao.sql`) e confira com `node scripts/verificar-supabase.mjs`.
 Sem Supabase tudo funciona no `.data/db.json`.
 
