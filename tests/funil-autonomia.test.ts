@@ -16,7 +16,7 @@ import { createLeadFromRaw } from "@/services/lead-service";
 import { isBlocked } from "@/services/outreach/blocklist";
 import { processDueOutreach } from "@/services/outreach/send";
 import { buildDossierForLead } from "@/services/presence/build";
-import { creativeTestHooks, publicCreativeFile } from "@/services/creatives/engine";
+import { publicCreativeFile } from "@/services/creatives/engine";
 import { siteBuildTestHooks, readPreview } from "@/services/sites/build";
 import { handleGatewayWebhook } from "@/services/whatsapp/webhook";
 import { emptyAgentData } from "@/types/agents";

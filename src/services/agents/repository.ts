@@ -125,12 +125,35 @@ const LOCAL_EVENTS_CAP = 1_000;
 const LOCAL_SPEND_CAP = 5_000;
 const LOCAL_RECEIPTS_CAP = 2_000;
 
+/** Snapshots já completados nesta execução (a normalização abaixo roda uma vez por snapshot, não a cada leitura). */
+const completed = new WeakSet<object>();
+
+/**
+ * Completa linhas gravadas antes da fase 6 (posts sem formato, campanhas sem criativo): o mesmo que os
+ * valores padrão da migração 0013 fazem no banco. Sem isto, um db.json antigo mostraria "undefined".
+ */
+function completeLegacyRows(data: AgentData): void {
+  for (const p of data.social_posts) {
+    const row = p as Partial<typeof p>;
+    row.format ??= "feed";
+    row.creative_id ??= null;
+    row.suggested_at ??= null;
+    row.scheduled_at ??= null;
+    row.approved_digest ??= null;
+  }
+  for (const c of data.ad_campaigns) (c as Partial<typeof c>).creative_id ??= null;
+}
+
 export function getAgentData(): AgentData {
   const db = getDb();
   if (!db.agents) db.agents = emptyAgentData();
   const empty = emptyAgentData();
   for (const key of Object.keys(empty) as AgentCollection[]) {
     if (!Array.isArray(db.agents[key])) (db.agents as unknown as Record<string, unknown[]>)[key] = [];
+  }
+  if (!completed.has(db.agents)) {
+    completeLegacyRows(db.agents);
+    completed.add(db.agents);
   }
   return db.agents;
 }
