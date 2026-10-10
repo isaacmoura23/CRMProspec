@@ -111,7 +111,7 @@ export default async function AgentePage({ params }: { params: Promise<{ id: str
         {sitePanel && (
           <>
             <SiteBuildList data={sitePanel} canRun={canRun} />
-            <SiteBuilderConfigForm config={sitePanel.config} browserFound={sitePanel.browserFound} canAdmin={canAdmin} />
+            <SiteBuilderConfigForm config={sitePanel.config} browserFound={sitePanel.browserFound} claudeFound={sitePanel.claudeFound} skillsInstalled={sitePanel.skillsInstalled} canAdmin={canAdmin} />
           </>
         )}
         {presencePanel && (

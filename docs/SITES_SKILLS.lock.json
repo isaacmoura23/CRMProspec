@@ -1,0 +1,43 @@
+{
+  "versao": 1,
+  "regra": "Só texto (SKILL.md) de repositórios públicos, lido e fixado por commit e SHA-256 antes do uso. Nenhum script das skills é executado: o construtor roda sem Bash. Para atualizar uma skill, leia o diff, troque commit e sha256 aqui e rode scripts/instalar-skills-sites.mjs.",
+  "inspecionado_em": "2026-10-10",
+  "skills": [
+    {
+      "nome": "emil-design-eng",
+      "repo": "emilkowalski/skills",
+      "commit": "e8a175de22ae1e49370fc144c1f3bb9aeedf988d",
+      "caminho": "skills/emil-design-eng/SKILL.md",
+      "sha256": "ffbe68e6007fb42cb8149f089b400a1ca007d59ba23e8948e2be4476f3175939",
+      "licenca": "MIT",
+      "uso": "Acabamento de interface: microdetalhes, estados, animação com propósito."
+    },
+    {
+      "nome": "emil-animate",
+      "repo": "emilkowalski/skills",
+      "commit": "e8a175de22ae1e49370fc144c1f3bb9aeedf988d",
+      "caminho": "skills/animate/SKILL.md",
+      "sha256": "b8ede161270458e6ae2e45e8a1985373515d4c63de5568ddb0f9012d7634356c",
+      "licenca": "MIT",
+      "uso": "Movimento: durações, easing e quando NÃO animar (aqui, só CSS)."
+    },
+    {
+      "nome": "impeccable",
+      "repo": "pbakaus/impeccable",
+      "commit": "d631a8827f99414d2b6daba4ef08b7f8701751d7",
+      "caminho": ".claude/skills/impeccable/SKILL.md",
+      "sha256": "35c883046117a416ca008ad7cbcda912c728a01f99b9a88130c2f0ab4c8d234c",
+      "licenca": "Apache-2.0",
+      "uso": "Direção de design e checagem de qualidade. Os comandos externos do SKILL.md (launcher) não são executados."
+    },
+    {
+      "nome": "taste-skill",
+      "repo": "Leonxlnx/taste-skill",
+      "commit": "717446e07a78d4e6d7918b1fde1a263378eebac9",
+      "caminho": "skills/taste-skill/SKILL.md",
+      "sha256": "aa194351b246b8b4799099d4ed7b033d29eab6e6e3d58d8d2172978be7b3ec89",
+      "licenca": "MIT",
+      "uso": "Anti-clichê visual: hierarquia, tipografia e composição sem cara de modelo pronto."
+    }
+  ]
+}

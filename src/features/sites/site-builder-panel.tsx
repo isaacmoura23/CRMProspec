@@ -18,11 +18,15 @@ import type { SiteBuildStatus } from "@/types/agents";
 const STATUS_LABEL: Record<SiteBuildStatus, string> = { na_fila: "Na fila", construindo: "Construindo", verificando: "Verificando", pronto: "Pronta", falhou: "Não entregue", cancelado: "Removida" };
 const STATUS_BADGE: Record<SiteBuildStatus, "neutral" | "info" | "good" | "danger" | "outline"> = { na_fila: "neutral", construindo: "info", verificando: "info", pronto: "good", falhou: "danger", cancelado: "outline" };
 
-export function SiteBuilderConfigForm({ config, browserFound, canAdmin }: { config: SiteBuilderConfig; browserFound: boolean; canAdmin: boolean }) {
+export function SiteBuilderConfigForm({ config, browserFound, claudeFound, skillsInstalled, canAdmin }: { config: SiteBuilderConfig; browserFound: boolean; claudeFound: boolean; skillsInstalled: string[]; canAdmin: boolean }) {
   const { run, pending } = useAgentAction();
   const [margin, setMargin] = React.useState(String(config.deadline_margin_hours));
   const [keep, setKeep] = React.useState(String(config.keep_days_after_meeting));
   const [needBrowser, setNeedBrowser] = React.useState(config.require_browser_check);
+  const [builder, setBuilder] = React.useState<SiteBuilderConfig["builder"]>(config.builder);
+  const [budget, setBudget] = React.useState(String(config.claude_budget_usd));
+  const [timeoutMin, setTimeoutMin] = React.useState(String(config.claude_timeout_min));
+  const [rounds, setRounds] = React.useState(String(config.claude_repair_rounds));
 
   const field = (label: string, value: string, set: (v: string) => void, min: number, max: number, hint?: string) => (
     <div className="space-y-1.5">
@@ -53,8 +57,34 @@ export function SiteBuilderConfigForm({ config, browserFound, canAdmin }: { conf
             </span>
           </span>
         </label>
+        <fieldset className="max-w-xl space-y-3 rounded-lg border border-border p-4" disabled={!canAdmin}>
+          <legend className="px-1 text-[13px] font-medium">Quem escreve a página</legend>
+          {([
+            ["modelos", "Gerador por modelos", "Determinístico, sem IA e sem custo. Usa só o que o dossiê comprova."],
+            ["claude-code", "Claude Code", "O Claude Code escreve o design com as skills de design fixadas, em modo restrito (só arquivos, sem internet nem comandos). Passa pela MESMA verificação; se falhar, passar do prazo ou do teto, a prévia sai pelo gerador por modelos."],
+          ] as const).map(([value, label, hint]) => (
+            <label key={value} className="flex cursor-pointer items-start gap-2.5">
+              <input type="radio" name="site-builder" className="mt-0.5 size-4 accent-[var(--color-primary)]" checked={builder === value} onChange={() => setBuilder(value)} />
+              <span>
+                <span className="block text-[13px] font-medium">{label}</span>
+                <span className="block text-xs text-muted-foreground">{hint}</span>
+              </span>
+            </label>
+          ))}
+          <p className="text-xs text-muted-foreground">
+            {claudeFound ? "Claude Code encontrado nesta máquina." : "Claude Code não encontrado (instale-o ou use CLAUDE_BIN): com ele escolhido, as prévias saem pelo gerador por modelos."}{" "}
+            {skillsInstalled.length > 0 ? `Skills de design instaladas: ${skillsInstalled.join(", ")}.` : "Skills de design não instaladas: rode node scripts/instalar-skills-sites.mjs."}
+          </p>
+          {builder === "claude-code" && (
+            <div className="grid gap-4 sm:grid-cols-3">
+              {field("Teto por prévia (US$)", budget, setBudget, 0.1, 10, "Soma de todas as rodadas.")}
+              {field("Minutos por rodada", timeoutMin, setTimeoutMin, 1, 20)}
+              {field("Rodadas de correção", rounds, setRounds, 0, 4, "Quando a verificação reprova.")}
+            </div>
+          )}
+        </fieldset>
         {canAdmin && (
-          <Button onClick={() => run(() => saveSiteBuilderConfig({ deadline_margin_hours: Number(margin), keep_days_after_meeting: Number(keep), require_browser_check: needBrowser }))} disabled={pending}>
+          <Button onClick={() => run(() => saveSiteBuilderConfig({ deadline_margin_hours: Number(margin), keep_days_after_meeting: Number(keep), require_browser_check: needBrowser, builder, claude_budget_usd: Number(budget), claude_timeout_min: Number(timeoutMin), claude_repair_rounds: Number(rounds) }))} disabled={pending}>
             {pending && <Loader2 className="animate-spin" />} Salvar configuração
           </Button>
         )}
@@ -74,6 +104,7 @@ function BuildItem({ row, canRun }: { row: SiteBuilderPanelData["rows"][number];
           {row.lead_name}
         </Link>
         <Badge variant={STATUS_BADGE[b.status]}>{STATUS_LABEL[b.status]}</Badge>
+        <Badge variant="outline">{b.builder === "claude-code" ? "Claude Code" : "Modelos"}</Badge>
         {row.meeting_at && <span className="text-xs text-muted-foreground">reunião {formatDateTime(row.meeting_at)}</span>}
         <span className="ml-auto text-xs text-muted-foreground">{timeAgo(b.updated_at)}</span>
       </div>

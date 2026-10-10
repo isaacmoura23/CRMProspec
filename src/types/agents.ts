@@ -334,8 +334,8 @@ export interface SiteBuild {
   lead_id: string;
   meeting_id: string | null;
   status: SiteBuildStatus;
-  /** Quem fez: hoje só o gerador por modelos (determinístico, sem IA). */
-  builder: "modelos";
+  /** Quem escreveu a página: o gerador por modelos (determinístico) ou o Claude Code em modo restrito. */
+  builder: "modelos" | "claude-code";
   /** Endereço não adivinhável da prévia (/previa/<token>). */
   token: string;
   content_hash: string | null;

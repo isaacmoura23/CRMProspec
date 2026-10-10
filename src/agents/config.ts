@@ -26,6 +26,11 @@ export const citySchema = z.object({
 });
 export type CityConfig = z.infer<typeof citySchema>;
 
+function clampMoney(value: unknown, min: number, max: number, fallback: number): number {
+  const n = typeof value === "number" ? value : Number.NaN;
+  return Number.isFinite(n) ? Math.min(max, Math.max(min, Math.round(n * 100) / 100)) : fallback;
+}
+
 function clampInt(value: unknown, min: number, max: number, fallback: number): number {
   const n = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(n)) return fallback;
@@ -274,12 +279,31 @@ export interface SiteBuilderConfig {
    * Sem ele a prévia não é entregue — só checagens de arquivo não bastam.
    */
   require_browser_check: boolean;
+  /**
+   * Quem escreve a página: "modelos" (gerador determinístico, sem IA) ou "claude-code" (o Claude Code
+   * em modo restrito, com as skills de design fixadas). A verificação é a mesma nos dois e, se o
+   * Claude Code falhar ou estourar o prazo/teto, a prévia sai pelo gerador por modelos.
+   */
+  builder: "modelos" | "claude-code";
+  /** Teto de gasto (US$) por prévia no Claude Code, somando todas as rodadas. */
+  claude_budget_usd: number;
+  /** Minutos que cada rodada do Claude Code pode levar. */
+  claude_timeout_min: number;
+  /** Rodadas de correção quando a verificação reprova a primeira escrita. */
+  claude_repair_rounds: number;
+  /** Modelo do Claude Code (vazio = o padrão da instalação). */
+  claude_model: string;
 }
 
 export const SITE_BUILDER_DEFAULTS: SiteBuilderConfig = {
   deadline_margin_hours: 2,
   keep_days_after_meeting: 7,
   require_browser_check: true,
+  builder: "modelos",
+  claude_budget_usd: 1.5,
+  claude_timeout_min: 8,
+  claude_repair_rounds: 2,
+  claude_model: "",
 };
 
 export function normalizeSiteBuilderConfig(raw: unknown): SiteBuilderConfig {
@@ -289,6 +313,11 @@ export function normalizeSiteBuilderConfig(raw: unknown): SiteBuilderConfig {
     deadline_margin_hours: clampInt(r.deadline_margin_hours, 1, 72, d.deadline_margin_hours),
     keep_days_after_meeting: clampInt(r.keep_days_after_meeting, 1, 60, d.keep_days_after_meeting),
     require_browser_check: r.require_browser_check === undefined ? d.require_browser_check : r.require_browser_check !== false,
+    builder: r.builder === "claude-code" ? "claude-code" : "modelos",
+    claude_budget_usd: clampMoney(r.claude_budget_usd, 0.1, 10, d.claude_budget_usd),
+    claude_timeout_min: clampInt(r.claude_timeout_min, 1, 20, d.claude_timeout_min),
+    claude_repair_rounds: clampInt(r.claude_repair_rounds, 0, 4, d.claude_repair_rounds),
+    claude_model: typeof r.claude_model === "string" && /^[A-Za-z0-9._:-]{0,64}$/.test(r.claude_model.trim()) ? r.claude_model.trim() : d.claude_model,
   };
 }
 
