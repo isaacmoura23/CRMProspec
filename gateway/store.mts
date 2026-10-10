@@ -210,6 +210,12 @@ export class GatewayStore {
     return (row as unknown as { state: "sending" | "sent" | "failed"; provider_message_id: string | null } | undefined) ?? null;
   }
 
+  /** O gateway enviou esta mensagem? (O WhatsApp devolve as enviadas por nós como "enviadas do celular".) */
+  hasSentMessage(sessionId: string, providerMessageId: string): boolean {
+    const row = this.db.prepare("SELECT 1 AS x FROM sends WHERE session_id = ? AND provider_message_id = ? LIMIT 1").get(sessionId, providerMessageId);
+    return row !== undefined;
+  }
+
   /**
    * Reserva a referência antes de chamar o WhatsApp. `false` = já existia e não
    * pode ser reaproveitada (outra tentativa já passou por aqui). Uma tentativa

@@ -273,13 +273,15 @@ número tem WhatsApp, escreve a primeira mensagem e a manda para **aprovação**
 (`/agentes/aprovacao`, com edição); só então ela entra na fila de envio, que
 respeita janela, teto diário, intervalo, máximo de 3 toques e aviso de saída. O
 envio real é ativado em degraus (simulado → só o seu número → real). Responder
-leads e marcar reuniões ficam para a próxima fase. Guia completo, riscos e
-operação em [`docs/WHATSAPP_LOCAL.md`](docs/WHATSAPP_LOCAL.md).
+Quando o lead responde, o Vendedor trata o pedido para parar (bloqueio imediato),
+classifica, propõe dois horários, marca a reunião e avisa no sino e no seu WhatsApp;
+o que não sabe tratar, e tudo o que você escrever pelo celular, passa para você. Guia
+completo, riscos e operação em [`docs/WHATSAPP_LOCAL.md`](docs/WHATSAPP_LOCAL.md).
 
 Sem `GOOGLE_PLACES_API_KEY` os agentes usam o diretório de demonstração e tudo
 que produzem é marcado como **dados de demonstração**.
 
-**Supabase:** rode `database/migrations/0005_agentes.sql`, `0006_whatsapp.sql` e `0007_vendedor.sql` (já estão em
+**Supabase:** rode `database/migrations/0005_agentes.sql`, `0006_whatsapp.sql`, `0007_vendedor.sql` e `0008_conversa.sql` (já estão em
 `database/setup-producao.sql`) e confira com `node scripts/verificar-supabase.mjs`.
 Sem Supabase tudo funciona no `.data/db.json`.
 

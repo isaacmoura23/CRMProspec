@@ -5,10 +5,11 @@ import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardDescription, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { getCurrentUser } from "@/lib/auth";
-import { canAdminister } from "@/lib/permissions";
+import { canAdminister, canWrite } from "@/lib/permissions";
 import { AutoRefresh, ModeSelect } from "@/features/agents/controls";
 import { MODE_BADGE, MODE_LABEL } from "@/features/agents/labels";
 import { EventList, TaskList } from "@/features/agents/task-list";
+import { ConversationConfigForm, ConversationsPanel, MeetingsPanel } from "@/features/seller/seller-conversations";
 import { OutreachQueue, SellerStats, SentMessages } from "@/features/seller/seller-sections";
 import { BlocklistManager, SellerConfigForm } from "@/features/seller/seller-forms";
 import { ConnectionPanel } from "@/features/whatsapp/connection-panel";
@@ -21,7 +22,9 @@ export const dynamic = "force-dynamic";
 export default async function VendedorPage() {
   const user = await getCurrentUser();
   const canAdmin = canAdminister(user.role);
+  const canEdit = canWrite(user.role);
   const [connection, panel] = await Promise.all([loadWhatsappPanelState({ includeQr: canAdmin }), getSellerPanel()]);
+  const safeConfig = { ...panel.config, owner_phone: canAdmin ? panel.config.owner_phone : null };
 
   return (
     <div>
@@ -31,7 +34,7 @@ export default async function VendedorPage() {
       </Link>
       <PageHeader
         title="Vendedor (WhatsApp)"
-        description="Escolhe quem abordar, confirma o WhatsApp do número, escreve a mensagem e a envia dentro da política de envio. Responder e marcar reuniões chega na próxima fase."
+        description="Escolhe quem abordar, confirma o WhatsApp do número, escreve a mensagem e a envia dentro da política de envio. Quando o lead responde, trata o pedido, propõe horários, marca a reunião e te avisa; o que não sabe tratar passa para você."
       >
         <Badge variant={MODE_BADGE[panel.mode]}>{MODE_LABEL[panel.mode]}</Badge>
         <ModeSelect agent="seller" mode={panel.mode} canEdit={canAdmin} />
@@ -40,9 +43,13 @@ export default async function VendedorPage() {
       <div className="space-y-6">
         <ConnectionPanel initial={connection} canConnect={canAdmin} />
         <SellerStats data={panel} />
+        <ConversationsPanel attention={panel.attention} recent={panel.conversations} canWrite={canEdit} />
+        <MeetingsPanel meetings={panel.meetings} canWrite={canEdit} ownerPhoneSet={panel.ownerPhoneSet} />
         <OutreachQueue rows={panel.queue} canAdmin={canAdmin} />
         <SentMessages rows={panel.messages} canAdmin={canAdmin} />
-        <SellerConfigForm config={panel.config} canAdmin={canAdmin} />
+        {/* O WhatsApp pessoal do dono só vai ao navegador de quem administra. */}
+        <SellerConfigForm config={safeConfig} canAdmin={canAdmin} />
+        <ConversationConfigForm config={safeConfig} canAdmin={canAdmin} />
         <BlocklistManager rows={panel.blocklist} canAdmin={canAdmin} />
 
         <div className="grid gap-6 lg:grid-cols-2">

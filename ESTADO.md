@@ -177,6 +177,55 @@ retomar sem precisar reconstruir o contexto.
   com o seu telefone. O passo 3 (real) é seu: ver `docs/WHATSAPP_LOCAL.md`.
 - **Próximas fases:** 3c (recebimento, classificação, reuniões, notificação ao seu WhatsApp).
 
+### AgentOS: conversa, reuniões e aviso ao dono — fase 3c (10/10/2026)
+- **Recebimento:** o gateway entrega as respostas dos leads (padrão ligado) e o que **você** escreve
+  pelo celular. O CRM liga ao lead pelo telefone (com ou sem o nono dígito), grava na conversa
+  que já existia (`/conversas`), muda o lead para "respondeu", avisa no sino e dispara
+  `lead.replied`. Número que não é de lead é ignorado, sem guardar o texto. Duplicata (mesmo
+  evento ou mesma mensagem do WhatsApp com outro id de evento) não repete nada.
+- **Pedido para parar:** regra fixa, antes de qualquer modelo (também com o agente pausado):
+  bloqueia o número, encerra o lead e cancela follow-ups e pedidos pendentes. Sem resposta.
+- **Você escreveu pelo celular:** a conversa passa a ser sua (`conversation_state`), o que o
+  agente tinha a caminho é cancelado e nem um ciclo já aprovado sai depois disso. O eco das
+  mensagens do próprio gateway é reconhecido (no gateway e no CRM) e não conta como você.
+  "Assumir" e "Devolver ao agente" no painel fazem o mesmo à mão.
+- **Classificação e resposta** (`services/conversation/`): usa o classificador de respostas
+  que já existia (11 categorias) com o texto do lead isolado em `<cliente>` e mais barreiras;
+  com `ANTHROPIC_API_KEY` (ou OpenAI) o modelo escolhe a categoria, sem chave valem as regras.
+  Interesse, preço, proposta ou reunião → registra o interesse e propõe **dois horários** dentro
+  da disponibilidade; o horário que o lead escolher marca a reunião (`meetings`, tarefa no CRM,
+  lead em "reunião", `lead.interested` e `meeting.scheduled`). Retorno futuro, sem prioridade
+  e "já tenho fornecedor" têm resposta curta; sem interesse encerra sem responder. Mídia,
+  mensagem vaga, horário que não ficou claro, dúvida fora do roteiro, lead que o Vendedor nunca
+  abordou ou frase proibida do perfil passam para **você** ("Precisam de você" + sino).
+- **Segurança do texto do lead:** ele é dado. A resposta sai de modelos fixos (sem link, preço
+  nem promessa), só para o telefone que o Vendedor já confirmou, e as barreiras valem também
+  para o que você editar. Resposta parada há mais de 2 dias ou com horários vencidos não sai.
+- **Aviso ao seu WhatsApp:** ao marcar a reunião, `owner_notices` envia pelo gateway (mesma
+  autorização, idempotência e regra de "sem confirmação não repete") lead, dia/hora e o que o
+  lead disse; o sino avisa sempre. Falha ou desconexão ficam visíveis na própria reunião.
+- Migração `0008_conversa.sql` (já no `setup-producao.sql` e no verificador): `conversation_state`,
+  `meetings`, `owner_notices`, e `kind` nos ciclos (abordagem x resposta, toque 0).
+- Tela `/agentes/vendedor`: "Precisam de você", Conversas (com quem conduz cada uma), Reuniões
+  (com o estado do aviso) e o formulário de disponibilidade e do seu WhatsApp. Respostas aparecem
+  em `/agentes/aprovacao` com texto exato e edição.
+- Verificado de verdade, ponta a ponta no navegador, com o gateway simulado (rota de mensagem
+  simulada só em desenvolvimento) + teste restrito: abordagem aprovada e enviada; resposta
+  "Gostei! Como funciona isso?" virou proposta de dois horários (aprovada e enviada); "Pode ser o
+  segundo" marcou a reunião, criou a tarefa, e o aviso saiu para o número do dono; "PARE" bloqueou
+  o outro lead sem resposta; uma mensagem "do celular" tirou a conversa do agente e retirou a
+  confirmação pendente; sem rolagem lateral no celular.
+- Testes: `npm test` (355), `tsc`, `lint` e `build` limpos.
+- **Não verificado:** o recebimento de mensagens com um WhatsApp de verdade (o gateway simulado
+  injeta pelo mesmo caminho, mas o Baileys real não foi exercitado; em particular o eco de envio
+  e o endereço `@lid` só estão cobertos por teste), o classificador com um modelo de verdade
+  (sem chave, só as regras foram exercitadas) e a migração `0008` no Supabase. Os leads e o
+  gateway simulados foram desfeitos: `.data/db.json` voltou ao estado anterior.
+- **Limites desta fase:** não há Google Calendar (a disponibilidade é a configurada) e nem dossiê
+  (Agente 3), então o aviso não leva link de dossiê; a tela /conversas ainda não envia pelo
+  WhatsApp (só o Vendedor envia).
+- **Próximas fases:** F2 (Agente 3, dossiê), F4 (Agente 5, sites) e F5 (anúncios e Instagram).
+
 ## Pela metade — Supabase
 
 Objetivo: em produção o banco vive na memória da instância, então leads

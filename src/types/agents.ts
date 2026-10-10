@@ -137,7 +137,7 @@ export interface Approval {
    * O que se aprova: uma tarefa de agente, ou uma mensagem de WhatsApp antes de
    * sair (aqui o pedido carrega o texto exato que será enviado).
    */
-  kind: "agent_task" | "outreach_message";
+  kind: "agent_task" | "outreach_message" | "conversation_reply";
   title: string;
   detail: string | null;
   /**
@@ -205,13 +205,17 @@ export interface WhatsappReceipt {
  * `incerto` é o envio sem confirmação (timeout): NUNCA é reenviado sozinho —
  * reenviar pode duplicar a mensagem para o lead.
  */
+/** `abordagem` = toque a quem ainda não respondeu; `resposta` = resposta a algo que o lead escreveu. */
+export type OutreachCycleKind = "abordagem" | "resposta";
+
 export type OutreachCycleStatus = "agendado" | "reivindicado" | "enviado" | "pulado" | "falhou" | "incerto" | "cancelado";
 
 export interface OutreachCycle {
   id: string;
   organization_id: string;
   lead_id: string;
-  /** 1 = primeira abordagem; 2 e 3 = acompanhamentos. */
+  kind: OutreachCycleKind;
+  /** 1 = primeira abordagem; 2 e 3 = acompanhamentos; 0 = resposta a uma mensagem do lead. */
   touch: number;
   /** Telefone em E.164, já confirmado como WhatsApp. */
   phone: string;
@@ -266,6 +270,72 @@ export interface ChannelBlock {
   created_at: string;
 }
 
+/** Quem conduz a conversa com o lead: o agente ou você (assumiu pelo celular ou pelo painel). */
+export type ConversationControl = "agente" | "humano";
+/** O que a conversa espera agora: nada, a escolha de um horário, ou uma pessoa. */
+export type ConversationAwaiting = "nada" | "horario" | "humano";
+
+/** Estado da conversa por lead (o `id` é o do lead). Quem manda no lead, o que ele disse por último e o que falta. */
+export interface ConversationState {
+  id: string;
+  organization_id: string;
+  lead_id: string;
+  control: ConversationControl;
+  control_reason: string | null;
+  awaiting: ConversationAwaiting;
+  /** Horários propostos ao lead (ISO), enquanto `awaiting = horario`. */
+  proposed_slots: string[];
+  last_inbound_at: string | null;
+  last_classification: string | null;
+  /** Por que a conversa precisa de uma pessoa (quando `awaiting = humano`). */
+  attention_reason: string | null;
+  /** O que o lead escreveu que demonstra interesse: a prova que o Agente 5 exigirá. */
+  interest_text: string | null;
+  interest_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type MeetingStatus = "agendada" | "realizada" | "cancelada";
+
+export interface Meeting {
+  id: string;
+  organization_id: string;
+  lead_id: string;
+  /** Início, em ISO. */
+  at: string;
+  duration_min: number;
+  status: MeetingStatus;
+  source: "agente" | "manual";
+  /** O que o lead disse que o levou à reunião (citação). */
+  interest_text: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type OwnerNoticeStatus = "pendente" | "enviado" | "falhou" | "incerto";
+
+/** Aviso ao WhatsApp pessoal do dono (hoje: reunião marcada). */
+export interface OwnerNotice {
+  id: string;
+  organization_id: string;
+  kind: "reuniao";
+  lead_id: string | null;
+  meeting_id: string | null;
+  phone: string;
+  body: string;
+  status: OwnerNoticeStatus;
+  attempts: number;
+  not_before: string;
+  provider_message_id: string | null;
+  last_error: string | null;
+  /** Vai ao gateway como referência: o mesmo aviso nunca sai duas vezes. */
+  idempotency_key: string;
+  created_at: string;
+  updated_at: string;
+  sent_at: string | null;
+}
+
 export interface AgentData {
   settings: AgentSettingsRow[];
   tasks: AgentTask[];
@@ -279,6 +349,9 @@ export interface AgentData {
   outreach_cycles: OutreachCycle[];
   outreach_messages: OutreachMessage[];
   channel_blocklist: ChannelBlock[];
+  conversation_state: ConversationState[];
+  meetings: Meeting[];
+  owner_notices: OwnerNotice[];
 }
 
 export function emptyAgentData(): AgentData {
@@ -295,5 +368,8 @@ export function emptyAgentData(): AgentData {
     outreach_cycles: [],
     outreach_messages: [],
     channel_blocklist: [],
+    conversation_state: [],
+    meetings: [],
+    owner_notices: [],
   };
 }

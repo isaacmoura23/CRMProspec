@@ -16,6 +16,7 @@ import { analyzeAndStore } from "@/jobs/prospecting";
 import { ensureLeadsLoaded } from "@/services/lead-repository";
 import { blockPhone, blockedKeys } from "@/services/outreach/blocklist";
 import { createOutreachCycle } from "@/services/outreach/cycles";
+import { humanLeadIds } from "@/services/conversation/state";
 import { whatsappGateway } from "@/services/whatsapp/config";
 import type { SellerConfig } from "@/agents/config";
 import type { Lead, LeadAnalysis } from "@/types";
@@ -45,16 +46,18 @@ export async function agentCampaignIds(): Promise<Set<string>> {
 /** Dados do que já existe em volta dos leads, carregados uma vez para avaliar muitos. */
 export async function loadOutreachContext() {
   const repo = agentRepo();
-  const [blocked, cycles, approvals, campaigns] = await Promise.all([
+  const [blocked, cycles, approvals, campaigns, human] = await Promise.all([
     blockedKeys(),
     repo.list("outreach_cycles"),
     repo.list("approvals", { where: { kind: "outreach_message" } }),
     agentCampaignIds(),
+    humanLeadIds(),
   ]);
   const byLead = <T extends { lead_id?: string }>(rows: T[], leadId: string) => rows.filter((r) => r.lead_id === leadId);
   return {
     blocked,
     campaigns,
+    isHuman: (leadId: string) => human.has(leadId),
     cyclesOf: (leadId: string) => byLead(cycles, leadId),
     approvalsOf: (leadId: string) => approvals.filter((a) => (a.payload as { lead_id?: string }).lead_id === leadId),
   };
@@ -140,6 +143,7 @@ async function prepare(ctx: AgentTaskContext): Promise<void> {
     cycles: around.cyclesOf(lead.id),
     approvals: around.approvalsOf(lead.id),
     agentCampaignIds: around.campaigns,
+    humanControl: around.isHuman(lead.id),
   });
   if (why) {
     ctx.setResult({ skipped: why });
@@ -225,6 +229,7 @@ export async function firstTouchCandidates(cfg: SellerConfig, limit: number): Pr
           cycles: around.cyclesOf(lead.id),
           approvals: around.approvalsOf(lead.id),
           agentCampaignIds: around.campaigns,
+          humanControl: around.isHuman(lead.id),
         }) === null
     )
     .sort((a, b) => (b.lead_score ?? 0) - (a.lead_score ?? 0))

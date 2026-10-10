@@ -39,6 +39,8 @@ const messageData = z.object({
   text: z.string().max(10_000),
   media_type: z.string().nullable(),
   profile_name: z.string().nullable(),
+  /** Quando a mensagem foi escrita (o do evento é o da entrega). Ausente em gateways antigos. */
+  message_at: z.string().datetime().nullable().optional(),
 });
 
 export const messageReceivedEvent = base.extend({

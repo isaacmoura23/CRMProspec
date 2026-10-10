@@ -23,10 +23,15 @@ import { agentRepo } from "@/services/agents/repository";
 import {
   getAgentMode,
   getNicheAnalystConfig,
+  getSellerConfig,
   isGloballyEnabled,
   saveSettings,
   setGloballyEnabled,
 } from "@/services/agents/settings";
+import { getDb, saveDb } from "@/lib/store";
+import { logActivity } from "@/services/activity";
+import { cancelPendingForLead, getConversationState, patchConversationState } from "@/services/conversation/state";
+import { whatsappGateway } from "@/services/whatsapp/config";
 import { AGENT_MODES, isAgentId, type AgentId } from "@/types/agents";
 
 /**
@@ -134,10 +139,107 @@ export async function saveSellerConfig(input: unknown): Promise<ActionResult> {
   if (!parsed.success) return fail("Configuração inválida. Revise a janela, os tetos e os intervalos.");
   if (parsed.data.send_days.length === 0) return fail("Escolha ao menos um dia da semana para enviar.");
   if (parsed.data.end_hour <= parsed.data.start_hour) return fail("O horário final precisa ser depois do inicial.");
-  await saveSettings("seller", { config: { ...normalizeSellerConfig(parsed.data) } });
+  // A política de envio não mexe nos horários de reunião nem no número do dono: os valores atuais são mantidos.
+  const current = await getSellerConfig();
+  await saveSettings("seller", { config: { ...normalizeSellerConfig({ ...current, ...parsed.data }) } });
   await logAgentEvent("seller", "info", "agent.config", `${admin.name} atualizou a política de envio.`);
   refresh();
   return ok("Política de envio salva.");
+}
+
+const conversationConfigSchema = z.object({
+  meeting_days: z.array(z.number().int().min(1).max(7)).max(7),
+  meeting_start_hour: z.number().int().min(0).max(23),
+  meeting_end_hour: z.number().int().min(1).max(24),
+  meeting_min_notice_hours: z.number().int().min(1).max(168),
+  meeting_duration_min: z.number().int().min(10).max(120),
+  owner_phone: z.string().trim().max(30),
+});
+
+export async function saveConversationConfig(input: unknown): Promise<ActionResult> {
+  const admin = await getAdminUser();
+  if (!admin) return fail(ADMIN_DENIED);
+  const parsed = conversationConfigSchema.safeParse(input);
+  if (!parsed.success) return fail("Configuração inválida. Revise os dias, os horários e o telefone.");
+  const d = parsed.data;
+  if (d.meeting_days.length === 0) return fail("Escolha ao menos um dia da semana para reuniões.");
+  if (d.meeting_end_hour <= d.meeting_start_hour) return fail("O horário final precisa ser depois do inicial.");
+
+  let ownerPhone: string | null = null;
+  let warning = "";
+  if (d.owner_phone) {
+    ownerPhone = normalizeBrazilianPhone(d.owner_phone);
+    if (!ownerPhone) return fail("Telefone do aviso inválido. Use o formato brasileiro, com DDD (ex.: (41) 99999-8888).");
+    // O número precisa ter WhatsApp: confere agora, se o gateway estiver de pé.
+    const gateway = whatsappGateway();
+    try {
+      if (gateway && (await gateway.status()).status === "CONNECTED") {
+        if (!(await gateway.recipient(ownerPhone)).exists) return fail("Esse número não tem WhatsApp. Confira o telefone.");
+      } else {
+        warning = " Não deu para confirmar o WhatsApp agora (gateway desconectado): ele será conferido no primeiro aviso.";
+      }
+    } catch {
+      warning = " Não deu para confirmar o WhatsApp agora: ele será conferido no primeiro aviso.";
+    }
+  }
+
+  const current = await getSellerConfig();
+  await saveSettings("seller", { config: { ...normalizeSellerConfig({ ...current, ...d, owner_phone: ownerPhone }) } });
+  await logAgentEvent("seller", "info", "agent.config", `${admin.name} atualizou as reuniões e o aviso ao WhatsApp.`);
+  refresh();
+  return ok(`Configuração de reuniões salva.${warning}`);
+}
+
+/** Você assume a conversa: o agente para de escrever nesse lead e o que ele tinha a caminho é cancelado. */
+export async function takeOverConversation(leadId: string): Promise<ActionResult> {
+  const user = await getWriterUser();
+  if (!user) return fail(WRITE_DENIED);
+  const lead = getDb().leads.find((l) => l.id === String(leadId));
+  if (!lead) return fail("Lead não encontrado.");
+  await patchConversationState(lead.id, { control: "humano", control_reason: `${user.name} assumiu a conversa`, awaiting: "nada", attention_reason: null, proposed_slots: [] });
+  const cancelled = await cancelPendingForLead(lead.id, "você assumiu a conversa");
+  logActivity(lead.id, "nota_adicionada", `${user.name} assumiu a conversa: o Vendedor parou de escrever neste lead.`, user.id);
+  saveDb();
+  await logAgentEvent("seller", "info", "conversation.taken_over", `${user.name} assumiu a conversa com ${lead.company_name} (${cancelled.cycles + cancelled.approvals + cancelled.tasks} item(ns) cancelado(s)).`, { lead_id: lead.id });
+  refresh();
+  return ok("Conversa assumida. O Vendedor não escreve mais neste lead.");
+}
+
+/** Devolve a conversa ao agente: ele volta a tratar o que o lead escrever dali em diante. */
+export async function returnConversation(leadId: string): Promise<ActionResult> {
+  const user = await getWriterUser();
+  if (!user) return fail(WRITE_DENIED);
+  const lead = getDb().leads.find((l) => l.id === String(leadId));
+  if (!lead) return fail("Lead não encontrado.");
+  if ((await getConversationState(lead.id))?.control !== "humano") return fail("Esta conversa já está com o agente.");
+  await patchConversationState(lead.id, { control: "agente", control_reason: null, awaiting: "nada", attention_reason: null });
+  await logAgentEvent("seller", "info", "conversation.returned", `${user.name} devolveu a conversa com ${lead.company_name} ao agente.`, { lead_id: lead.id });
+  refresh();
+  return ok("Conversa devolvida ao agente.");
+}
+
+/** Tira o alerta de "precisa de você" depois de resolvido por fora (sem devolver nem assumir). */
+export async function dismissAttention(leadId: string): Promise<ActionResult> {
+  const user = await getWriterUser();
+  if (!user) return fail(WRITE_DENIED);
+  const state = await getConversationState(String(leadId));
+  if (!state || state.awaiting !== "humano") return fail("Nada pendente nesta conversa.");
+  await patchConversationState(state.lead_id, { awaiting: "nada", attention_reason: null });
+  refresh();
+  return ok("Pronto, alerta removido.");
+}
+
+export async function setMeetingStatus(meetingId: string, status: string): Promise<ActionResult> {
+  const user = await getWriterUser();
+  if (!user) return fail(WRITE_DENIED);
+  if (status !== "realizada" && status !== "cancelada") return fail("Estado inválido.");
+  const repo = agentRepo();
+  const meeting = await repo.get("meetings", String(meetingId));
+  if (!meeting) return fail("Reunião não encontrada.");
+  await repo.update("meetings", meeting.id, { status, updated_at: new Date().toISOString() });
+  await logAgentEvent("seller", "info", "meeting.updated", `${user.name} marcou a reunião como ${status}.`, { meeting_id: meeting.id });
+  refresh();
+  return ok(status === "realizada" ? "Reunião marcada como realizada." : "Reunião cancelada.");
 }
 
 const blockSchema = z.object({ phone: z.string().trim().min(8).max(30), reason: z.string().trim().max(120).optional() });

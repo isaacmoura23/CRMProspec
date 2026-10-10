@@ -69,6 +69,9 @@ const TABELAS = [
   ["outreach_cycles", "0007_vendedor.sql"],
   ["outreach_messages", "0007_vendedor.sql"],
   ["channel_blocklist", "0007_vendedor.sql"],
+  ["conversation_state", "0008_conversa.sql"],
+  ["meetings", "0008_conversa.sql"],
+  ["owner_notices", "0008_conversa.sql"],
 ];
 const pendentes = new Set();
 for (const [tabela, migracao] of TABELAS) {

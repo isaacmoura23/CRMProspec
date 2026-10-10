@@ -56,6 +56,8 @@ export interface EligibilityInput {
   approvals: readonly Approval[];
   /** Campanhas criadas pelos agentes; `null` = não restringir. */
   agentCampaignIds: ReadonlySet<string> | null;
+  /** Você assumiu a conversa deste lead: o agente não escreve mais nela. */
+  humanControl?: boolean;
 }
 
 /** Devolve por que o lead NÃO pode ser abordado agora, ou `null` se pode. */
@@ -63,6 +65,7 @@ export function leadEligibility(i: EligibilityInput): string | null {
   const { lead, touch, cfg } = i;
 
   if (lead.archived) return "lead arquivado";
+  if (i.humanControl) return "conversa assumida por você";
   if (touch < 1 || touch > cfg.max_touches) return "limite de toques atingido";
   const allowed = touch === 1 ? FIRST_TOUCH_STATUSES : FOLLOW_UP_STATUSES;
   if (!allowed.includes(lead.status)) return `status "${lead.status}" não recebe ${touch === 1 ? "primeira abordagem" : "acompanhamento"}`;

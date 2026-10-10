@@ -2,6 +2,7 @@ import "server-only";
 import { getDb, saveDb } from "@/lib/store";
 import { uid } from "@/lib/utils";
 import { checkMessage, isStaleCycle, nextWindowOpen, isWithinWindow, touchDelayDays } from "@/lib/outreach-policy";
+import { checkReply } from "@/lib/conversation-policy";
 import { FIRST_TOUCH_STATUSES, FOLLOW_UP_STATUSES } from "@/lib/outreach-eligibility";
 import { ProviderError, type SendResult, type SendTextInput } from "@/providers/whatsapp/types";
 import { logAgentEvent } from "@/services/agents/log";
@@ -11,6 +12,7 @@ import { getAgentMode, getSellerConfig, isGloballyEnabled } from "@/services/age
 import { logActivity } from "@/services/activity";
 import { setLeadStatus } from "@/services/lead-service";
 import { blockPhone, isBlocked } from "@/services/outreach/blocklist";
+import { getConversationState, handOffToHuman, isHumanControlled, patchConversationState, recordConversationMessage } from "@/services/conversation/state";
 import { sendGate, windowOf } from "@/services/outreach/gate";
 import { whatsappGateway } from "@/services/whatsapp/config";
 import type { Lead } from "@/types";
@@ -36,6 +38,8 @@ export const MAX_TECHNICAL_ATTEMPTS = 4;
 const RECHECK_MS = 60_000;
 const CONFIG_WAIT_MS = 10 * 60_000;
 const STUCK_CLAIM_MS = 10 * 60_000;
+/** Uma resposta parada por mais que isto já não responde ao que o lead disse. */
+const REPLY_STALE_MS = 48 * 3_600_000;
 
 /** O mínimo do gateway que o envio usa (injetável nos testes). */
 export interface OutreachGateway {
@@ -132,8 +136,15 @@ export async function processCycle(cycleId: string, deps: OutreachDeps = {}): Pr
   // 3) O que valia na aprovação pode não valer mais.
   if (!lead || lead.archived) return skip("lead removido ou arquivado");
   if (await isBlocked(cycle.phone)) return skip("número na lista de bloqueio");
-  const allowed = cycle.touch === 1 ? FIRST_TOUCH_STATUSES : FOLLOW_UP_STATUSES;
-  if (!allowed.includes(lead.status)) return skip(`o lead mudou de estado (${lead.status})`);
+  if (await isHumanControlled(cycle.lead_id)) return skip("você assumiu a conversa");
+  const isReply = cycle.kind === "resposta";
+  if (isReply) {
+    // Responder vale em qualquer etapa em que o lead ainda está vivo.
+    if (lead.status === "perdido" || lead.status === "fechado") return skip(`o lead está em "${lead.status}"`);
+  } else {
+    const allowed = cycle.touch === 1 ? FIRST_TOUCH_STATUSES : FOLLOW_UP_STATUSES;
+    if (!allowed.includes(lead.status)) return skip(`o lead mudou de estado (${lead.status})`);
+  }
 
   // 4) Aprovação: em modo de aprovação, só sai o que o dono aprovou.
   if (cycle.approval_id) {
@@ -143,8 +154,22 @@ export async function processCycle(cycleId: string, deps: OutreachDeps = {}): Pr
     return defer("em modo de aprovação, esta mensagem não foi aprovada", new Date(now.getTime() + 5 * RECHECK_MS), true);
   }
 
-  // 5) Etapa obsoleta: não envia mensagem velha como se fosse de hoje; reprepara.
-  if (isStaleCycle(new Date(cycle.scheduled_for), now)) {
+  // 5) Etapa obsoleta: não envia mensagem velha como se fosse de hoje.
+  if (isReply) {
+    // Resposta parada há mais de dois dias (desconexão, pausa) já não responde ao que o lead disse: passa para uma pessoa.
+    if (now.getTime() - Date.parse(cycle.scheduled_for) > REPLY_STALE_MS) {
+      await touch({ status: "pulado", skip_reason: "resposta ficou para trás", claimed_at: null });
+      await handOffToHuman(lead, "A resposta ao lead ficou parada por mais de dois dias e não foi enviada: veja a conversa e responda você.");
+      return { result: "skipped", reason: "resposta ficou para trás" };
+    }
+    // Horários propostos que passaram antes de a mensagem sair não podem mais ser oferecidos.
+    const conv = await getConversationState(lead.id);
+    if (conv?.awaiting === "horario" && conv.proposed_slots.some((s) => Date.parse(s) < now.getTime() + 3_600_000)) {
+      await touch({ status: "pulado", skip_reason: "horários propostos já passaram", claimed_at: null });
+      await handOffToHuman(lead, "Os horários propostos passaram antes de a mensagem sair: combine você um novo horário.");
+      return { result: "skipped", reason: "horários propostos já passaram" };
+    }
+  } else if (isStaleCycle(new Date(cycle.scheduled_for), now)) {
     await touch({ status: "pulado", skip_reason: "etapa obsoleta", claimed_at: null });
     await enqueueAgentTask({
       agent: "seller",
@@ -164,11 +189,11 @@ export async function processCycle(cycleId: string, deps: OutreachDeps = {}): Pr
   }
 
   // 7) Teto do dia e intervalo entre envios.
-  const gate = await sendGate(now, cfg);
+  const gate = await sendGate(now, cfg, { ignoreCap: isReply });
   if (!gate.ok) return defer(gate.reason === "cap" ? "teto diário de envios atingido" : "aguardando o intervalo entre envios", gate.until, true, true);
 
   // 8) Última barreira do texto, não importa quem o escreveu ou editou.
-  const violation = checkMessage(cycle.body);
+  const violation = isReply ? checkReply(cycle.body, getDb().company_profile.never_say) : checkMessage(cycle.body);
   if (violation) return skip(`texto reprovado: ${violation}`);
 
   // 9) Gateway de pé e conectado.
@@ -216,7 +241,7 @@ export async function processCycle(cycleId: string, deps: OutreachDeps = {}): Pr
     const at = nowOf(deps).toISOString();
     await repo.update("outreach_messages", messageId, { status: "SENT", provider_message_id: result.providerMessageId, sent_at: at });
     await touch({ status: "enviado", sent_at: at, last_error: null, claimed_at: null });
-    await afterSent(lead, cycle, now);
+    await afterSent(lead, cycle, now, result.providerMessageId);
     return { result: "sent", messageId };
   }
 
@@ -276,12 +301,25 @@ export async function processCycle(cycleId: string, deps: OutreachDeps = {}): Pr
 }
 
 /** Atualiza o lead e agenda o próximo toque. Só roda depois de o gateway confirmar o envio. */
-async function afterSent(lead: Lead, cycle: OutreachCycle, now: Date) {
+async function afterSent(lead: Lead, cycle: OutreachCycle, now: Date, providerMessageId: string | null = null) {
   const cfg = await getSellerConfig();
   const at = new Date().toISOString();
   const first = !lead.last_contact_at;
   lead.last_contact_at = at;
   lead.updated_at = at;
+  // A mensagem entra no histórico do CRM (/conversas), junto com o que o lead respondeu.
+  recordConversationMessage({ leadId: lead.id, direction: "out", text: cycle.body, author: "agente", providerMessageId, at });
+
+  if (cycle.kind === "resposta") {
+    logActivity(lead.id, "mensagem_enviada", "Resposta enviada pelo Vendedor no WhatsApp.", null);
+    saveDb();
+    // A proposta de horários acabou de chegar ao lead: agora sim a próxima resposta dele é uma escolha.
+    const conv = await getConversationState(lead.id);
+    if (conv && conv.awaiting === "nada" && conv.proposed_slots.length > 0) await patchConversationState(lead.id, { awaiting: "horario" });
+    await logAgentEvent("seller", "info", "outreach.sent", `Resposta enviada a ${lead.company_name}.`, { cycle_id: cycle.id });
+    return;
+  }
+
   logActivity(lead.id, first ? "primeiro_contato" : "mensagem_enviada", `WhatsApp enviado pelo Vendedor (${cycle.touch}º toque).`, null);
   if (lead.status !== "contatado") setLeadStatus(lead.id, "contatado", null);
   else saveDb();

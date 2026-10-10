@@ -275,6 +275,10 @@ export interface Message {
   content: string;
   classification: string | null;
   created_at: string;
+  /** Id da mensagem no WhatsApp: impede gravar duas vezes a mesma mensagem reentregue. */
+  provider_message_id?: string;
+  /** Quem escreveu: o agente, você pelo celular ou pelo painel, ou o lead. */
+  author?: "lead" | "agente" | "humano";
 }
 
 export type ProposalStatus =

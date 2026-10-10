@@ -125,7 +125,7 @@ export function OutreachQueue({ rows, canAdmin }: { rows: QueueRow[]; canAdmin: 
                 <Link href={`/leads/${r.lead_id}`} className="text-[13px] font-medium hover:underline">
                   {r.lead_name}
                 </Link>
-                <Badge variant="outline">{r.touch}º toque</Badge>
+                <Badge variant="outline">{r.kind === "resposta" ? "Resposta" : `${r.touch}º toque`}</Badge>
                 <Badge variant={CYCLE_BADGE[r.status]}>{CYCLE_LABEL[r.status]}</Badge>
                 <span className="text-xs text-muted-foreground">{shownPhone(r.phone, canAdmin)}</span>
                 {r.status === "agendado" && (
@@ -189,6 +189,7 @@ export function SentMessages({ rows, canAdmin }: { rows: MessageRow[]; canAdmin:
                 <Link href={`/leads/${m.lead_id}`} className="text-[13px] font-medium hover:underline">
                   {m.lead_name}
                 </Link>
+                {m.is_reply && <Badge variant="outline">Resposta</Badge>}
                 <Badge variant={MESSAGE_BADGE[m.status]}>{MESSAGE_LABEL[m.status]}</Badge>
                 <span className="text-xs text-muted-foreground">{shownPhone(m.phone, canAdmin)}</span>
                 <span className="ml-auto text-xs text-muted-foreground" title={formatDateTime(m.sent_at)}>

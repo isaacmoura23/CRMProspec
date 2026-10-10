@@ -30,4 +30,5 @@ process.env.NODE_ENV = "test";
 delete process.env.NEXT_PUBLIC_SUPABASE_URL;
 delete process.env.SUPABASE_SERVICE_ROLE_KEY;
 delete process.env.OPENAI_API_KEY;
+delete process.env.ANTHROPIC_API_KEY;
 delete process.env.RESEND_API_KEY;

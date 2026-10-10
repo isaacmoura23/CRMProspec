@@ -86,6 +86,7 @@ function makeManager(over: Partial<ConstructorParameters<typeof SessionManager>[
     emit: (e) => events.push(e),
     dryRun: true,
     forwardMessages: false,
+    ownSendGraceMs: 0,
     qrWaitMaxMs: 60_000,
     sleep: async () => {},
     ...over,
@@ -123,11 +124,12 @@ describe("configuração do gateway", () => {
     assert.throws(() => loadConfig({ ...ok, GATEWAY_PORT: "abc" }), /GATEWAY_PORT/);
   });
 
-  it("é seguro por padrão: só local, modo de teste ligado, mensagens não entregues", () => {
+  it("é seguro por padrão: só local, modo de teste ligado; as respostas dos leads são entregues e podem ser desligadas", () => {
     const c = loadConfig(ok);
     assert.equal(c.host, "127.0.0.1");
     assert.equal(c.dryRun, true);
-    assert.equal(c.forwardMessages, false);
+    assert.equal(c.forwardMessages, true);
+    assert.equal(loadConfig({ ...ok, GATEWAY_FORWARD_MESSAGES: "0" }).forwardMessages, false);
     assert.equal(c.webhookUrl, null);
     assert.equal(loadConfig({ ...ok, WHATSAPP_GATEWAY_DRY_RUN: "0" }).dryRun, false);
     assert.equal(loadConfig({ ...ok, WHATSAPP_GATEWAY_DRY_RUN: "1" }).dryRun, true);
@@ -795,6 +797,89 @@ describe("API HTTP do gateway", () => {
       assert.equal(big.status, 413);
     } finally {
       server.close();
+    }
+  });
+});
+
+describe("mensagens do celular x mensagens do próprio gateway", () => {
+  const CONTATO = "5541988887777@s.whatsapp.net";
+
+  it("o eco de uma mensagem que o gateway enviou NÃO vira \"você escreveu pelo celular\"", async () => {
+    const h = makeManager({ forwardMessages: true });
+    const sock = await pair(h);
+    h.events.length = 0;
+    h.store.beginSend("atlas", "cyc-eco", 1);
+    h.store.finishSend("atlas", "cyc-eco", "sent", "WA-ECO-0001");
+    sock.emit("messages.upsert", { type: "notify", messages: [{ key: { id: "WA-ECO-0001", remoteJid: CONTATO, fromMe: true }, message: { conversation: "Oi!" } }] });
+    assert.equal(h.events.length, 0, "foi o gateway quem enviou");
+    sock.emit("messages.upsert", { type: "notify", messages: [{ key: { id: "WA-MAO-0001", remoteJid: CONTATO, fromMe: true }, message: { conversation: "Oi!" } }] });
+    assert.deepEqual(h.events.map((e) => e.id), ["from_phone:WA-MAO-0001"], "uma enviada pelo celular continua valendo");
+  });
+
+  it("com a espera ligada, o eco que chega antes de o envio registrar o id também é descartado", async () => {
+    const h = makeManager({ forwardMessages: true, ownSendGraceMs: 30 });
+    const sock = await pair(h);
+    h.events.length = 0;
+    sock.emit("messages.upsert", { type: "notify", messages: [{ key: { id: "WA-CEDO-001", remoteJid: CONTATO, fromMe: true }, message: { conversation: "Oi!" } }] });
+    // O envio só termina de gravar o id depois do eco.
+    h.store.beginSend("atlas", "cyc-cedo", 1);
+    h.store.finishSend("atlas", "cyc-cedo", "sent", "WA-CEDO-001");
+    await new Promise((r) => setTimeout(r, 80));
+    assert.equal(h.events.length, 0);
+  });
+
+  it("o evento leva a hora em que a mensagem foi escrita", async () => {
+    const h = makeManager({ forwardMessages: true });
+    const sock = await pair(h);
+    h.events.length = 0;
+    sock.emit("messages.upsert", {
+      type: "notify",
+      messages: [{ key: { id: "MSG-HORA-01", remoteJid: CONTATO }, message: { conversation: "Quero saber mais" }, messageTimestamp: 1_791_000_000 }],
+    });
+    const e = h.events[0]!;
+    assert.equal(e.type, "message.received");
+    if (e.type === "message.received") assert.equal(e.data.message_at, new Date(1_791_000_000 * 1000).toISOString());
+    assert.equal(gatewayEvent.safeParse(e).success, true);
+  });
+});
+
+describe("mensagem simulada (só em desenvolvimento)", () => {
+  it("a rota só existe com a simulação ligada e injeta pelo mesmo caminho do WhatsApp", async () => {
+    const { createSimulatedFactory } = await import("../gateway/simulated.mjs");
+    const store = new GatewayStore(":memory:");
+    const events: EmittedEvent[] = [];
+    const manager = new SessionManager({
+      store,
+      factory: createSimulatedFactory("5541900000000"),
+      emit: (e) => events.push(e),
+      dryRun: true,
+      forwardMessages: true,
+      ownSendGraceMs: 0,
+      qrWaitMaxMs: 60_000,
+      sleep: async () => {},
+    });
+    const { injectSimulatedMessage } = await import("../gateway/simulated.mjs");
+    const withSim = createGatewayServer({ manager, store, token: "t".repeat(20), dryRun: true, simulateInbound: (id, body) => injectSimulatedMessage(id, body) });
+    const without = createGatewayServer({ manager, store, token: "t".repeat(20), dryRun: true });
+    const call = async (server: ReturnType<typeof createGatewayServer>, body: unknown) => {
+      await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+      const port = (server.address() as { port: number }).port;
+      try {
+        return await fetch(`http://127.0.0.1:${port}/sessions/atlas/simulate-inbound`, { method: "POST", headers: { authorization: `Bearer ${"t".repeat(20)}` }, body: JSON.stringify(body) });
+      } finally {
+        server.close();
+      }
+    };
+    assert.equal((await call(without, { peer: "5541988887777", text: "oi" })).status, 404, "sem simulação a rota não existe");
+    assert.equal((await call(withSim, { peer: "5541988887777", text: "oi" })).status, 409, "sem sessão conectada");
+    await manager.connect("atlas");
+    events.length = 0;
+    assert.equal((await call(withSim, { peer: "5541988887777", text: "Quanto custa?", id: "SIMIN-TESTE-1" })).status, 200);
+    assert.deepEqual(events.map((e) => e.id), ["received:SIMIN-TESTE-1"]);
+    const e = events[0]!;
+    if (e.type === "message.received") {
+      assert.equal(e.data.peer, "+5541988887777");
+      assert.equal(e.data.text, "Quanto custa?");
     }
   });
 });

@@ -1,10 +1,10 @@
 import "server-only";
 import { EVENT_ID_HEADER, SIGNATURE_HEADER, TIMESTAMP_HEADER, verifyGatewayEvent } from "@/lib/gateway-signature";
 import { gatewayEvent } from "@/lib/gateway-events";
-import { logAgentEvent } from "@/services/agents/log";
 import { agentRepo, orgId, UniqueViolationError } from "@/services/agents/repository";
 import { whatsappWebhookSecret } from "@/services/whatsapp/config";
 import { applyDeliveryStatus } from "@/services/outreach/delivery";
+import { handleHumanMessage, handleInboundMessage } from "@/services/conversation/inbound";
 import { applySessionStatus } from "@/services/whatsapp/link";
 
 /**
@@ -72,11 +72,17 @@ export async function handleGatewayWebhook(input: {
     // Mensagens que não são do Vendedor (as que você mandou pelo celular) não casam com nada: tudo bem.
     await applyDeliveryStatus({ providerMessageId: event.data.provider_message_id, status: event.data.status, at: event.occurred_at });
   } else {
-    // O gateway só entrega mensagens quando GATEWAY_FORWARD_MESSAGES=1, e isso
-    // pertence à fase do Vendedor. Recusar com 422 deixa o evento guardado como
-    // "morto" no gateway em vez de descartá-lo em silêncio.
-    await logAgentEvent("sistema", "warn", "whatsapp.unhandled", `Evento ${event.type} recebido, mas ainda não é tratado pelo CRM.`);
-    return reply(422, { error: "tipo de evento ainda não tratado" });
+    const message = {
+      providerMessageId: event.data.provider_message_id,
+      peer: event.data.peer,
+      text: event.data.text,
+      mediaType: event.data.media_type,
+      profileName: event.data.profile_name,
+      at: event.data.message_at ?? null,
+    };
+    // Mensagem do lead: grava e decide. Mensagem sua, do celular: assume a conversa.
+    if (event.type === "message.received") await handleInboundMessage(message);
+    else await handleHumanMessage(message);
   }
 
   // O recibo vem DEPOIS do efeito: se o processamento falhar, o reenvio não é tomado por duplicata.

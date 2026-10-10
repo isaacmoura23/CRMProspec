@@ -118,6 +118,57 @@ fica **incerto** e **nunca é reenviado**: um evento de entrega posterior o reso
 Para ver o fluxo sem número nenhum, `GATEWAY_SIMULATE=1` troca o WhatsApp por um
 socket falso (aprovar → enviar → entregue), só para desenvolvimento.
 
+## Conversa: o que o Vendedor faz quando o lead responde
+
+O gateway entrega ao CRM as mensagens dos leads (`GATEWAY_FORWARD_MESSAGES`, ligado por
+padrão) e as que **você** escreve pelo celular. O CRM só guarda mensagens de números
+que são de algum lead (com ou sem o nono dígito); o resto é ignorado, sem guardar o texto.
+
+1. **Pediu para parar** ("pare", "não quero", "me tira da lista", "número errado",
+   "spam"…): regra fixa, **antes de qualquer modelo**. O número vai para a lista de
+   bloqueio, o lead vira "perdido" e tudo o que estava a caminho (follow-ups, pedidos
+   de aprovação) é cancelado. O Vendedor não responde nada, nem com o agente pausado.
+2. **Você escreveu pelo celular**: a conversa passa para você. O agente cancela o que
+   tinha a caminho e não escreve mais naquele lead (o painel mostra "Com você", com o
+   botão "Devolver ao agente"). O eco das mensagens que o próprio gateway enviou é
+   reconhecido e **não** conta como você.
+3. **Qualquer outra resposta**: é gravada na conversa do CRM (/conversas), o lead vira
+   "respondeu", o sino avisa, e o Vendedor classifica (modelo, se houver chave, ou regras)
+   dentro de uma lista fechada de categorias:
+   - interesse, "quer saber mais", reunião, proposta ou preço → registra o interesse
+     (a prova que o Agente 5 vai exigir), propõe **dois horários** dentro da
+     disponibilidade configurada e, quando o lead escolhe um, marca a reunião;
+   - "agora não" ou retorno futuro → reconhece e agenda o retorno para daqui a 30 dias;
+   - "já tenho fornecedor" → deixa a porta aberta;
+   - sem interesse → encerra, sem responder nem insistir;
+   - mídia, mensagem vaga, dúvida fora do roteiro, horário que não ficou claro, lead que o
+     Vendedor nunca abordou ou frase proibida pelo perfil da empresa → **passa para você**
+     (aparece em "Precisam de você" e no sino).
+
+O texto do lead é **dado, nunca instrução**: o modelo só escolhe uma categoria; a resposta
+sai de modelos fixos, nunca leva link, preço nem promessa, e **só vai ao telefone que o
+Vendedor já confirmou**, nunca a um número que apareça na mensagem. Respostas seguem o
+modo do agente: em "Em aprovação" você lê e aprova cada uma (com edição); em
+"Automático" saem sozinhas, dentro da janela e do intervalo (mas sem pesar no teto diário
+de abordagens frias). Uma resposta parada por mais de dois dias, ou com horários que já
+passaram, **não sai**: passa para você.
+
+### Aviso de reunião no seu WhatsApp
+
+Em **/agentes/vendedor › Reuniões e aviso ao seu WhatsApp**, configure os dias e horários das
+reuniões e o **seu número pessoal**. Quando uma reunião é marcada, o CRM cria a tarefa e o
+aviso no sino e envia, pelo número de prospecção, uma mensagem com lead, dia e hora e o que
+o lead disse. Esse aviso passa pela autorização do gateway e pela idempotência (nunca sai
+duas vezes; sem confirmação, não é repetido). **No teste restrito, o seu número pessoal
+também precisa estar em `WHATSAPP_ALLOWED_RECIPIENTS`.** Se o número de prospecção cair ou for
+banido, o aviso não sai — por isso o sino e o painel sempre avisam.
+
+### Para testar sem número de verdade
+
+Com `GATEWAY_SIMULATE=1`, o gateway aceita `POST /sessions/<org>/simulate-inbound` (com o
+token) `{"peer":"5541999990001","text":"Quanto custa?","fromMe":false}` e injeta a mensagem
+pelo mesmo caminho do WhatsApp real. A rota não existe fora do modo simulado.
+
 ## Segurança
 
 - O gateway escuta só em `127.0.0.1`. Nunca o exponha sem HTTPS na frente.
@@ -139,7 +190,7 @@ Ver `.env.gateway.example`. As principais: `WHATSAPP_GATEWAY_TOKEN`,
 `WHATSAPP_WEBHOOK_SECRET`, `CRM_WEBHOOK_URL`, `GATEWAY_PORT`,
 `WHATSAPP_GATEWAY_DRY_RUN`, `WHATSAPP_ALLOWED_RECIPIENTS` (teste restrito),
 `GATEWAY_FORWARD_DELIVERY` (status de entrega ao CRM; padrão ligado),
-`GATEWAY_FORWARD_MESSAGES` (deixe `0` até a fase de respostas, F3c),
+`GATEWAY_FORWARD_MESSAGES` (respostas dos leads e mensagens suas pelo celular; padrão ligado),
 `GATEWAY_SIMULATE` e `GATEWAY_DB_FILE`.
 
 ## Política de envio do Vendedor

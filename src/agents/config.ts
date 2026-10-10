@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { normalizeBrazilianPhone } from "@/lib/outreach-policy";
 import type { AgentMode } from "@/types/agents";
 import type { SearchParams } from "@/types";
 
@@ -112,6 +113,17 @@ export interface SellerConfig {
   max_pending_approvals: number;
   /** Só aborda leads criados pelos agentes (não os que você cadastrou à mão). */
   only_agent_leads: boolean;
+
+  /* Conversa: horários de reunião que o agente pode propor e aviso ao dono. */
+  /** Dias em que aceita reunião (ISO: 1 = segunda … 7 = domingo). */
+  meeting_days: number[];
+  meeting_start_hour: number;
+  meeting_end_hour: number;
+  /** Antecedência mínima entre a resposta do lead e o primeiro horário proposto. */
+  meeting_min_notice_hours: number;
+  meeting_duration_min: number;
+  /** WhatsApp pessoal do dono (E.164) que recebe o aviso de reunião marcada; `null` = sem aviso por WhatsApp. */
+  owner_phone: string | null;
 }
 
 export const SELLER_DEFAULTS: SellerConfig = {
@@ -128,6 +140,12 @@ export const SELLER_DEFAULTS: SellerConfig = {
   lookups_per_day: 60,
   max_pending_approvals: 10,
   only_agent_leads: true,
+  meeting_days: [2, 3, 4],
+  meeting_start_hour: 10,
+  meeting_end_hour: 17,
+  meeting_min_notice_hours: 24,
+  meeting_duration_min: 20,
+  owner_phone: null,
 };
 
 export function normalizeSellerConfig(raw: unknown): SellerConfig {
@@ -146,6 +164,12 @@ export function normalizeSellerConfig(raw: unknown): SellerConfig {
     ? r.touch_spacing_days.map((n) => clampInt(n, 1, 30, 3)).slice(0, 2)
     : d.touch_spacing_days;
 
+  const meetingDays = Array.isArray(r.meeting_days)
+    ? [...new Set(r.meeting_days.map(Number).filter((n) => Number.isInteger(n) && n >= 1 && n <= 7))].sort()
+    : d.meeting_days;
+  const meetingStart = clampInt(r.meeting_start_hour, 0, 23, d.meeting_start_hour);
+  const meetingEnd = Math.max(meetingStart + 1, clampInt(r.meeting_end_hour, 1, 24, d.meeting_end_hour));
+
   return {
     send_days: days,
     start_hour: start,
@@ -160,6 +184,12 @@ export function normalizeSellerConfig(raw: unknown): SellerConfig {
     lookups_per_day: clampInt(r.lookups_per_day, 0, 500, d.lookups_per_day),
     max_pending_approvals: clampInt(r.max_pending_approvals, 1, 50, d.max_pending_approvals),
     only_agent_leads: r.only_agent_leads === undefined ? d.only_agent_leads : r.only_agent_leads !== false,
+    meeting_days: meetingDays,
+    meeting_start_hour: meetingStart,
+    meeting_end_hour: meetingEnd,
+    meeting_min_notice_hours: clampInt(r.meeting_min_notice_hours, 1, 168, d.meeting_min_notice_hours),
+    meeting_duration_min: clampInt(r.meeting_duration_min, 10, 120, d.meeting_duration_min),
+    owner_phone: normalizeBrazilianPhone(typeof r.owner_phone === "string" ? r.owner_phone : null),
   };
 }
 

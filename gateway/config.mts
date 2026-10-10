@@ -71,7 +71,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     // Seguro por padrão: só envia de verdade quem desligar o modo de teste de propósito.
     dryRun: !falsy(env.WHATSAPP_GATEWAY_DRY_RUN),
     dbFile: path.resolve(env.GATEWAY_DB_FILE?.trim() || path.join("gateway", ".data", "gateway.db")),
-    forwardMessages: truthy(env.GATEWAY_FORWARD_MESSAGES),
+    forwardMessages: !falsy(env.GATEWAY_FORWARD_MESSAGES),
     qrWaitMaxMs: Math.max(30_000, Number(env.GATEWAY_QR_WAIT_MAX_MS ?? 5 * 60_000)),
     // Ligado por padrão: o estado de entrega não carrega conteúdo e o CRM precisa dele.
     forwardDelivery: !falsy(env.GATEWAY_FORWARD_DELIVERY),

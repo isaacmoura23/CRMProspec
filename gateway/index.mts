@@ -15,7 +15,7 @@
  */
 import { loadConfig } from "./config.mjs";
 import { createBaileysFactory } from "./baileys.mjs";
-import { createSimulatedFactory } from "./simulated.mjs";
+import { createSimulatedFactory, injectSimulatedMessage } from "./simulated.mjs";
 import { OutboxDispatcher } from "./outbox.mjs";
 import { createGatewayServer } from "./server.mjs";
 import { SessionManager } from "./session.mjs";
@@ -59,7 +59,14 @@ async function main() {
     log,
   });
 
-  const server = createGatewayServer({ manager, store, token: config.token, dryRun: config.dryRun, log });
+  const server = createGatewayServer({
+    manager,
+    store,
+    token: config.token,
+    dryRun: config.dryRun,
+    simulateInbound: config.simulate ? (sessionId, body) => injectSimulatedMessage(sessionId, body) : undefined,
+    log,
+  });
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(config.port, config.host, resolve);

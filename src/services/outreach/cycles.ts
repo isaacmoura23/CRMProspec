@@ -1,7 +1,7 @@
 import "server-only";
 import { uid } from "@/lib/utils";
 import { agentRepo, orgId, UniqueViolationError } from "@/services/agents/repository";
-import type { OutreachCycle } from "@/types/agents";
+import type { OutreachCycle, OutreachCycleKind } from "@/types/agents";
 
 /**
  * Criação de ciclos de envio.
@@ -14,6 +14,8 @@ import type { OutreachCycle } from "@/types/agents";
 
 export interface NewCycle {
   leadId: string;
+  /** `resposta` = resposta a uma mensagem do lead (toque 0); o padrão é `abordagem`. */
+  kind?: OutreachCycleKind;
   touch: number;
   phone: string;
   body: string;
@@ -29,6 +31,7 @@ export async function createOutreachCycle(input: NewCycle): Promise<OutreachCycl
     id,
     organization_id: orgId(),
     lead_id: input.leadId,
+    kind: input.kind ?? "abordagem",
     touch: input.touch,
     phone: input.phone,
     body: input.body,

@@ -40,6 +40,7 @@ export const KIND_LABEL: Record<string, string> = {
   "niche.analyze": "Analisar nichos",
   "prospect.run": "Prospectar",
   "outreach.prepare": "Preparar abordagem",
+  "conversation.respond": "Responder lead",
 };
 
 export function kindLabel(kind: string): string {

@@ -1,7 +1,7 @@
 import "server-only";
 import { getDb, saveDb } from "@/lib/store";
 import { getSupabase, isSupabaseEnabled } from "@/lib/supabase";
-import { emptyAgentData, type AgentData, type AgentTask, type OutreachCycle } from "@/types/agents";
+import { emptyAgentData, type AgentData, type AgentTask, type OutreachCycle, type OwnerNotice } from "@/types/agents";
 
 /**
  * Persistência do AgentOS.
@@ -31,6 +31,9 @@ const TABLE: Record<AgentCollection, string> = {
   outreach_cycles: "outreach_cycles",
   outreach_messages: "outreach_messages",
   channel_blocklist: "channel_blocklist",
+  conversation_state: "conversation_state",
+  meetings: "meetings",
+  owner_notices: "owner_notices",
 };
 
 /** Chave natural de cada coleção (o `id` em todas, exceto onde o contrato diz outra coisa). */
@@ -200,6 +203,12 @@ class LocalAgentRepo implements AgentRepo {
       // Um lead nunca tem duas abordagens ativas ao mesmo tempo.
       if (all.some((r) => r.lead_id === c.lead_id && r.organization_id === c.organization_id && (r.status === "agendado" || r.status === "reivindicado"))) {
         throw new UniqueViolationError("Este lead já tem uma abordagem em andamento.");
+      }
+    }
+    if (col === "owner_notices") {
+      const n = row as unknown as OwnerNotice;
+      if ((rows as unknown as OwnerNotice[]).some((r) => r.idempotency_key === n.idempotency_key)) {
+        throw new UniqueViolationError("Já existe um aviso com esta chave de idempotência.");
       }
     }
     if (col === "tasks") {

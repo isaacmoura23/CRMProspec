@@ -58,7 +58,11 @@ function OutreachApprovalItem({ approval: a, canDecide, busy, onDecide }: { appr
             rows={8}
             className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-[13px] shadow-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
           />
-          <p className="text-xs text-muted-foreground">Sem links nem promessas de resultado. O aviso para parar de receber é recolocado se você o apagar.</p>
+          <p className="text-xs text-muted-foreground">
+            {a.kind === "conversation_reply"
+              ? "Sem links, preços nem promessas de resultado."
+              : "Sem links nem promessas de resultado. O aviso para parar de receber é recolocado se você o apagar."}
+          </p>
         </div>
       ) : (
         <blockquote className="whitespace-pre-wrap rounded-lg border-l-2 border-primary bg-surface-hover px-3 py-2 text-[13px]">{original}</blockquote>
@@ -120,7 +124,7 @@ export function ApprovalsView({
         ) : (
           <ul className="divide-y divide-border">
             {pending.map((a) =>
-              a.kind === "outreach_message" ? (
+              a.kind === "outreach_message" || a.kind === "conversation_reply" ? (
                 <OutreachApprovalItem key={a.id} approval={a} canDecide={canDecide} busy={busy} onDecide={(approve, editedBody) => run(() => decideAgentApproval(a.id, approve, editedBody))} />
               ) : (
               <li key={a.id} className="flex flex-wrap items-center gap-3 px-5 py-3">

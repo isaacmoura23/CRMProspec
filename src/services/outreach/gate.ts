@@ -67,10 +67,11 @@ export async function outreachStats(now: Date, cfg: SellerConfig): Promise<Outre
 export type GateResult = { ok: true } | { ok: false; reason: "cap" | "gap"; until: Date };
 
 /** Pode sair mais uma mensagem agora? */
-export async function sendGate(now: Date, cfg: SellerConfig): Promise<GateResult> {
+export async function sendGate(now: Date, cfg: SellerConfig, opts: { ignoreCap?: boolean } = {}): Promise<GateResult> {
   const stats = await outreachStats(now, cfg);
 
-  if (stats.sentToday >= stats.cap) {
+  // Responder a quem acabou de escrever não é abordagem fria: não pesa no teto, só no intervalo.
+  if (!opts.ignoreCap && stats.sentToday >= stats.cap) {
     // Teto do dia esgotado: só amanhã, e dentro da janela.
     const open = nextWindowOpen(nextLocalDay(now), windowOf(cfg));
     return { ok: false, reason: "cap", until: open ?? nextLocalDay(now) };

@@ -3,6 +3,8 @@ import type { AgentDefinition, PlannedTask } from "@/agents/types";
 import { dayKey, spentToday } from "@/services/agents/log";
 import { agentRepo } from "@/services/agents/repository";
 import { getAgentMode, getSellerConfig } from "@/services/agents/settings";
+import { CONVERSATION_RESPOND } from "@/services/conversation/inbound";
+import { registerConversationHandlers } from "@/services/conversation/respond";
 import { firstTouchCandidates, OUTREACH_PREPARE, registerOutreachPrepareHandler } from "@/services/outreach/prepare";
 import { isWhatsappGatewayConfigured } from "@/services/whatsapp/config";
 import { getWhatsappLink } from "@/services/whatsapp/link";
@@ -57,11 +59,12 @@ export const seller: AgentDefinition = {
   id: "seller",
   name: "Vendedor (WhatsApp)",
   description: "Escolhe quem abordar, confirma o WhatsApp do número, escreve a mensagem e a envia dentro da política de envio — com a sua aprovação enquanto você quiser.",
-  kinds: [OUTREACH_PREPARE],
+  kinds: [OUTREACH_PREPARE, CONVERSATION_RESPOND],
   direct: true,
   plan,
 };
 
 export function registerSellerHandlers() {
   registerOutreachPrepareHandler();
+  registerConversationHandlers();
 }

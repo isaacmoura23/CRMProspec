@@ -20,7 +20,7 @@ import type { GatewayStore } from "./store.mjs";
  */
 
 const MAX_BODY_BYTES = 64 * 1024;
-const ROUTE = /^\/sessions\/([A-Za-z0-9_-]{1,64})\/(status|connect|disconnect|logout|messages|recipient)$/;
+const ROUTE = /^\/sessions\/([A-Za-z0-9_-]{1,64})\/(status|connect|disconnect|logout|messages|recipient|simulate-inbound)$/;
 
 function tokenMatches(received: string, expected: string): boolean {
   const a = Buffer.from(received);
@@ -55,6 +55,8 @@ export function createGatewayServer(deps: {
   store: GatewayStore;
   token: string;
   dryRun: boolean;
+  /** Só em desenvolvimento (GATEWAY_SIMULATE=1): injeta uma mensagem "recebida" no socket simulado. */
+  simulateInbound?: (sessionId: string, body: { peer: string; text: string; fromMe?: boolean; id?: string }) => boolean;
   log?: (msg: string, extra?: Record<string, unknown>) => void;
 }): http.Server {
   const { manager, store, token } = deps;
@@ -80,6 +82,17 @@ export function createGatewayServer(deps: {
       if (action === "connect" && req.method === "POST") return send(res, 200, { ...(await manager.connect(sessionId)) });
       if ((action === "disconnect" || action === "logout") && req.method === "POST") {
         return send(res, 200, { ...(await manager.disconnect(sessionId, action === "logout")) });
+      }
+      if (action === "simulate-inbound" && req.method === "POST") {
+        if (!deps.simulateInbound) return send(res, 404, { error: "rota inexistente" });
+        const body = await readJson(req);
+        const ok = deps.simulateInbound(sessionId, {
+          peer: String(body.peer ?? ""),
+          text: String(body.text ?? ""),
+          fromMe: body.fromMe === true,
+          id: typeof body.id === "string" ? body.id : undefined,
+        });
+        return send(res, ok ? 200 : 409, ok ? { ok: true } : { error: "sem sessão simulada conectada", kind: "TEMPORARY" });
       }
       if (action === "recipient" && req.method === "POST") {
         const body = await readJson(req);

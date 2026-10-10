@@ -14,6 +14,27 @@ import type { SocketFactory, WaSocketLike } from "./session.mjs";
 
 type Handler = (...args: unknown[]) => void;
 
+/** Sockets simulados vivos, por sessão: o que permite injetar uma mensagem "recebida" em desenvolvimento. */
+const live = new Map<string, SimulatedSocket>();
+
+export interface SimulatedIncoming {
+  /** Telefone do contato (só dígitos, com o país). */
+  peer: string;
+  text: string;
+  /** `true` = como se você tivesse escrito pelo celular. */
+  fromMe?: boolean;
+  /** Id da mensagem; omitido, um novo é criado. Repetir o mesmo id simula a reentrega. */
+  id?: string;
+}
+
+/** Faz o socket simulado "receber" uma mensagem, pelo mesmo caminho do WhatsApp de verdade. Devolve `false` sem sessão simulada. */
+export function injectSimulatedMessage(sessionId: string, input: SimulatedIncoming): boolean {
+  const sock = live.get(sessionId);
+  if (!sock) return false;
+  sock.inject(input);
+  return true;
+}
+
 class SimulatedSocket implements WaSocketLike {
   private handlers = new Map<string, Handler[]>();
   private counter = 0;
@@ -37,6 +58,23 @@ class SimulatedSocket implements WaSocketLike {
     setTimeout(() => this.emit("connection.update", { connection: "open" }), 50);
   }
 
+  private injected = 0;
+
+  inject(input: SimulatedIncoming) {
+    const id = input.id ?? `SIMIN${Date.now().toString(36)}${(this.injected++).toString(36)}`.toUpperCase();
+    this.emit("messages.upsert", {
+      type: "notify",
+      messages: [
+        {
+          key: { id, remoteJid: `${input.peer.replace(/\D/g, "")}@s.whatsapp.net`, fromMe: Boolean(input.fromMe) },
+          message: { conversation: input.text },
+          pushName: input.fromMe ? "Você" : "Contato simulado",
+          messageTimestamp: Math.floor(Date.now() / 1000),
+        },
+      ],
+    });
+  }
+
   end() {}
   async logout() {}
 
@@ -55,8 +93,9 @@ class SimulatedSocket implements WaSocketLike {
 }
 
 export function createSimulatedFactory(phone = process.env.GATEWAY_SIMULATE_PHONE ?? "5500000000000"): SocketFactory {
-  return async () => {
+  return async ({ sessionId }) => {
     const sock = new SimulatedSocket(phone);
+    live.set(sessionId, sock);
     sock.open();
     return sock;
   };

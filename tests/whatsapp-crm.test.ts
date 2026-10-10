@@ -134,7 +134,7 @@ describe("webhook do gateway (CRM)", () => {
     assert.equal(getAgentData().whatsapp_receipts.length, 0);
   });
 
-  it("mensagem ainda não tratada é recusada com 422 (fica guardada no gateway), sem recibo", async () => {
+  it("mensagem de número que não é de nenhum lead é confirmada (recibo gravado) e ignorada", async () => {
     const msg = {
       id: "received:ABCDEF123",
       type: "message.received",
@@ -143,9 +143,9 @@ describe("webhook do gateway (CRM)", () => {
       data: { provider_message_id: "ABCDEF123", peer: "+5541988887777", text: "oi", media_type: null, profile_name: null },
     };
     const res = await handleGatewayWebhook(signed(msg));
-    assert.equal(res.status, 422);
-    assert.equal(getAgentData().whatsapp_receipts.length, 0);
-    assert.ok(getAgentData().events.some((x) => x.type === "whatsapp.unhandled"));
+    assert.equal(res.status, 200);
+    assert.equal(getAgentData().whatsapp_receipts.length, 1);
+    assert.ok(getAgentData().events.some((x) => x.type === "conversation.unknown"));
   });
 
   it("só mudança de estado vira log: o mesmo estado repetido não enche o registro", async () => {

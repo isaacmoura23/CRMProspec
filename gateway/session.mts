@@ -80,6 +80,12 @@ export interface SessionManagerDeps {
   allowedRecipients?: string[];
   /** Limite do envio ao WhatsApp antes de tratar como "sem confirmação". */
   sendTimeoutMs?: number;
+  /**
+   * O WhatsApp devolve as mensagens que o próprio gateway enviou como "enviadas do
+   * celular". Espera este tempo antes de entregar uma "do celular" ao CRM, para
+   * conferir se foi o gateway quem a enviou (e então ignorá-la). 0 = sem espera.
+   */
+  ownSendGraceMs?: number;
   sleep?: (ms: number) => Promise<void>;
   log?: (msg: string, extra?: Record<string, unknown>) => void;
 }
@@ -116,7 +122,17 @@ type RawMessage = {
   key: { id?: string | null; remoteJid?: string | null; remoteJidAlt?: string | null; fromMe?: boolean | null };
   message?: Record<string, any> | null; // eslint-disable-line @typescript-eslint/no-explicit-any
   pushName?: string | null;
+  messageTimestamp?: number | string | { toNumber?: () => number; low?: number } | null;
 };
+
+/** Quando a mensagem foi escrita (segundos desde 1970 no protocolo), em ISO; `null` se ausente ou absurdo. */
+function messageAt(m: RawMessage): string | null {
+  const raw = m.messageTimestamp;
+  const seconds = raw == null ? NaN : typeof raw === "object" ? (typeof raw.toNumber === "function" ? raw.toNumber() : (raw.low ?? NaN)) : Number(raw);
+  if (!Number.isFinite(seconds) || seconds <= 0) return null;
+  const date = new Date(seconds * 1000);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
 
 function contentOf(m: RawMessage): { text: string; mediaType: string | null } | null {
   const msg = m.message;
@@ -545,20 +561,30 @@ export class SessionManager {
     if (!peer || !content || !m.key.id) return;
 
     const fromMe = Boolean(m.key.fromMe);
-    this.deps.emit({
-      // Id determinístico: o WhatsApp pode reentregar a mesma mensagem ao reconectar.
-      id: `${fromMe ? "from_phone" : "received"}:${m.key.id}`,
-      type: fromMe ? "message.from_phone" : "message.received",
-      session_id: s.sessionId,
-      occurred_at: new Date().toISOString(),
-      data: {
-        provider_message_id: m.key.id,
-        peer,
-        text: content.text,
-        media_type: content.mediaType,
-        profile_name: m.pushName ?? null,
-      },
-    });
+    const id = m.key.id;
+    const emit = () => {
+      // Foi o próprio gateway quem enviou: não é você escrevendo pelo celular.
+      if (fromMe && this.deps.store.hasSentMessage(s.sessionId, id)) return;
+      this.deps.emit({
+        // Id determinístico: o WhatsApp pode reentregar a mesma mensagem ao reconectar.
+        id: `${fromMe ? "from_phone" : "received"}:${id}`,
+        type: fromMe ? "message.from_phone" : "message.received",
+        session_id: s.sessionId,
+        occurred_at: new Date().toISOString(),
+        data: {
+          provider_message_id: id,
+          peer,
+          text: content.text,
+          media_type: content.mediaType,
+          profile_name: m.pushName ?? null,
+          message_at: messageAt(m),
+        },
+      });
+    };
+    // O eco de uma mensagem enviada pelo gateway pode chegar antes de o envio terminar e registrar o id: confere depois.
+    const grace = this.deps.ownSendGraceMs ?? 2_000;
+    if (fromMe && grace > 0) setTimeout(emit, grace).unref?.();
+    else emit();
   }
 }
 

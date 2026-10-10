@@ -203,6 +203,7 @@ const cycle = (over: Partial<OutreachCycle> = {}): OutreachCycle => ({
   id: "c1",
   organization_id: "org",
   lead_id: "lead_1",
+  kind: "abordagem",
   touch: 1,
   phone: "+5541999998888",
   body: "x",

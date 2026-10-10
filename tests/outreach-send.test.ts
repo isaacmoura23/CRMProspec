@@ -91,6 +91,7 @@ async function mkCycle(lead: Lead, over: Partial<OutreachCycle> = {}): Promise<O
     id: `ocy_t${n}`,
     organization_id: getDb().organization.id,
     lead_id: lead.id,
+    kind: "abordagem",
     touch: 1,
     phone: "+5541999998888",
     body: BODY,

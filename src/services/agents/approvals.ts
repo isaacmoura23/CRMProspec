@@ -1,7 +1,9 @@
 import "server-only";
 import { uid } from "@/lib/utils";
 import type { PlannedTask } from "@/agents/types";
+import { checkReply } from "@/lib/conversation-policy";
 import { checkMessage, withOptOutFooter } from "@/lib/outreach-policy";
+import { getDb } from "@/lib/store";
 import { logAgentEvent } from "@/services/agents/log";
 import { createOutreachCycle } from "@/services/outreach/cycles";
 import { enqueueAgentTask } from "@/services/agents/queue";
@@ -99,6 +101,7 @@ export async function decideApproval(id: string, approve: boolean, userId: strin
 
   // Mensagem de WhatsApp: aprovar cria o ciclo de envio com o texto exato (editado ou não).
   if (approval.kind === "outreach_message") return approveOutreachMessage(approval, userId, now, opts.editedBody);
+  if (approval.kind === "conversation_reply") return approveConversationReply(approval, userId, now, opts.editedBody);
 
   const spec = approval.payload as { agent?: AgentId; kind?: string; payload?: Record<string, unknown>; dedupeKey?: string };
   if (!spec.agent || !spec.kind) return { ok: false, error: "Pedido sem tarefa associada." };
@@ -140,6 +143,35 @@ async function approveOutreachMessage(approval: Approval, userId: string, now: s
 
   const cycle = await createOutreachCycle({ leadId: p.lead_id, touch: p.touch ?? 1, phone: p.phone, body, approvalId: approval.id });
   if (!cycle) return { ok: false, error: "Este lead já tem uma abordagem em andamento." };
+
+  const updated = await repo.update("approvals", approval.id, {
+    status: "aprovado",
+    decided_by: userId,
+    decided_at: now,
+    payload: { ...approval.payload, body, edited },
+  });
+  await logAgentEvent("seller", "info", "approval.approved", `Aprovado${edited ? " (com edição)" : ""}: ${approval.title}.`, { cycle_id: cycle.id });
+  return { ok: true, approval: updated ?? approval };
+}
+
+/**
+ * Aprovar uma resposta ao lead cria o ciclo de envio (toque 0) com o texto exato.
+ * Janela, intervalo, bloqueio e conexão ainda decidem quando sai.
+ */
+async function approveConversationReply(approval: Approval, userId: string, now: string, editedBody?: string): Promise<DecisionResult> {
+  const repo = agentRepo();
+  const p = approval.payload as { lead_id?: string; phone?: string; body?: string };
+  if (!p.lead_id || !p.phone || !p.body) return { ok: false, error: "Pedido sem os dados da resposta." };
+
+  const edited = editedBody !== undefined && editedBody.trim() !== p.body.trim();
+  const body = edited ? editedBody!.trim() : p.body;
+  if (edited) {
+    const violation = checkReply(body, getDb().company_profile.never_say);
+    if (violation) return { ok: false, error: violation };
+  }
+
+  const cycle = await createOutreachCycle({ leadId: p.lead_id, kind: "resposta", touch: 0, phone: p.phone, body, approvalId: approval.id });
+  if (!cycle) return { ok: false, error: "Este lead já tem um envio em andamento." };
 
   const updated = await repo.update("approvals", approval.id, {
     status: "aprovado",
