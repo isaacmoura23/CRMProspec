@@ -15,7 +15,8 @@ import type { GatewayStore } from "./store.mjs";
  *   POST /sessions/:id/disconnect         fecha o socket, guarda a sessão
  *   POST /sessions/:id/logout             encerra e apaga a sessão
  *   POST /sessions/:id/recipient          { to } → o número tem WhatsApp?
- *   POST /sessions/:id/messages           { to, text, clientReference } (modo de teste)
+ *   POST /sessions/:id/messages           { to, text, clientReference, authorization? }
+ *                                         simulado, ou real com a autorização de envio do CRM
  */
 
 const MAX_BODY_BYTES = 64 * 1024;
@@ -86,10 +87,11 @@ export function createGatewayServer(deps: {
       }
       if (action === "messages" && req.method === "POST") {
         const body = await readJson(req);
-        const result = manager.send(sessionId, {
+        const result = await manager.send(sessionId, {
           to: String(body.to ?? ""),
           text: String(body.text ?? ""),
           clientReference: typeof body.clientReference === "string" ? body.clientReference : "",
+          authorization: body.authorization && typeof body.authorization === "object" ? (body.authorization as { expires_at?: number; signature?: string }) : null,
         });
         return send(res, 200, { ...result, documentMessageId: null });
       }

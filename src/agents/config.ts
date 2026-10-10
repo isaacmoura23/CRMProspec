@@ -85,6 +85,85 @@ export function normalizeNicheAnalystConfig(raw: unknown): NicheAnalystConfig {
 }
 
 /* ------------------------------------------------------------------ */
+/* Agente 4 — Vendedor (WhatsApp)                                      */
+/* ------------------------------------------------------------------ */
+
+export interface SellerConfig {
+  /** Dias em que pode enviar (ISO: 1 = segunda … 7 = domingo). */
+  send_days: number[];
+  /** Horário de envio no fuso de São Paulo: de `start_hour` (inclusive) a `end_hour` (exclusive). */
+  start_hour: number;
+  end_hour: number;
+  /** Máximo de mensagens por dia que o número chega a enviar. */
+  daily_cap_max: number;
+  /** Sobe o teto por semana (10, 20, 30…) até o máximo, em vez de começar no máximo. */
+  warmup: boolean;
+  /** Espera aleatória entre dois envios, em segundos. */
+  min_gap_seconds: number;
+  max_gap_seconds: number;
+  /** Dias de espera depois do 1º e do 2º toque (no máximo 3 toques por lead). */
+  touch_spacing_days: number[];
+  max_touches: number;
+  /** Só leads com score a partir daqui recebem abordagem. */
+  min_lead_score: number;
+  /** Consultas "este número tem WhatsApp?" por dia. */
+  lookups_per_day: number;
+  /** Com o modo de aprovação, quantos pedidos podem esperar ao mesmo tempo. */
+  max_pending_approvals: number;
+  /** Só aborda leads criados pelos agentes (não os que você cadastrou à mão). */
+  only_agent_leads: boolean;
+}
+
+export const SELLER_DEFAULTS: SellerConfig = {
+  send_days: [1, 2, 3, 4, 5],
+  start_hour: 9,
+  end_hour: 18,
+  daily_cap_max: 40,
+  warmup: true,
+  min_gap_seconds: 60,
+  max_gap_seconds: 180,
+  touch_spacing_days: [3, 4],
+  max_touches: 3,
+  min_lead_score: 50,
+  lookups_per_day: 60,
+  max_pending_approvals: 10,
+  only_agent_leads: true,
+};
+
+export function normalizeSellerConfig(raw: unknown): SellerConfig {
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const d = SELLER_DEFAULTS;
+
+  const days = Array.isArray(r.send_days)
+    ? [...new Set(r.send_days.map(Number).filter((n) => Number.isInteger(n) && n >= 1 && n <= 7))].sort()
+    : d.send_days;
+  const start = clampInt(r.start_hour, 0, 23, d.start_hour);
+  // O fim nunca antes do início: uma janela vazia seria um "pausado" disfarçado.
+  const end = Math.max(start + 1, clampInt(r.end_hour, 1, 24, d.end_hour));
+  const minGap = clampInt(r.min_gap_seconds, 10, 3600, d.min_gap_seconds);
+  const maxGap = Math.max(minGap, clampInt(r.max_gap_seconds, 10, 7200, d.max_gap_seconds));
+  const spacing = Array.isArray(r.touch_spacing_days)
+    ? r.touch_spacing_days.map((n) => clampInt(n, 1, 30, 3)).slice(0, 2)
+    : d.touch_spacing_days;
+
+  return {
+    send_days: days,
+    start_hour: start,
+    end_hour: end,
+    daily_cap_max: clampInt(r.daily_cap_max, 0, 200, d.daily_cap_max),
+    warmup: r.warmup === undefined ? d.warmup : r.warmup !== false,
+    min_gap_seconds: minGap,
+    max_gap_seconds: maxGap,
+    touch_spacing_days: spacing.length > 0 ? spacing : d.touch_spacing_days,
+    max_touches: clampInt(r.max_touches, 1, 3, d.max_touches),
+    min_lead_score: clampInt(r.min_lead_score, 0, 100, d.min_lead_score),
+    lookups_per_day: clampInt(r.lookups_per_day, 0, 500, d.lookups_per_day),
+    max_pending_approvals: clampInt(r.max_pending_approvals, 1, 50, d.max_pending_approvals),
+    only_agent_leads: r.only_agent_leads === undefined ? d.only_agent_leads : r.only_agent_leads !== false,
+  };
+}
+
+/* ------------------------------------------------------------------ */
 /* Agente 2 — Prospectador                                             */
 /* ------------------------------------------------------------------ */
 

@@ -39,7 +39,10 @@ export function createLeadFromRaw(raw: RawLead, campaignId: string | null, userI
     id: uid("lead"),
     organization_id: db.organization.id,
     company_name: raw.company_name,
-    contact_name: contactNameMaybe(),
+    // Só os dados de demonstração têm um contato fictício. Um lead real (Google
+    // Maps, CSV…) não traz o nome de quem atende: inventar um faria a abordagem
+    // dizer "Oi, Carlos" a quem nunca se chamou Carlos.
+    contact_name: raw.source === "diretorio" || raw.source === "demo" ? contactNameMaybe() : null,
     legal_name: null,
     segment: raw.segment,
     description: raw.description ?? null,

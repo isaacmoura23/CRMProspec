@@ -50,5 +50,5 @@ export function whatsappWebhookSecret(): string | null {
 
 export function whatsappGateway(): QrGatewayWhatsAppProvider | null {
   const cfg = whatsappGatewayConfig();
-  return cfg ? new QrGatewayWhatsAppProvider(cfg.url, cfg.token, cfg.sessionId) : null;
+  return cfg ? new QrGatewayWhatsAppProvider(cfg.url, cfg.token, cfg.sessionId, whatsappWebhookSecret()) : null;
 }

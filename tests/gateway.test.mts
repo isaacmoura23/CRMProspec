@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { signGatewayEvent, verifyGatewayEvent, SIGNATURE_HEADER, TIMESTAMP_HEADER, EVENT_ID_HEADER } from "@/lib/gateway-signature";
+import { mintSendAuthorization, verifySendAuthorization } from "@/lib/gateway-send-auth";
 import { gatewayEvent } from "@/lib/gateway-events";
 import { loadConfig } from "../gateway/config.mjs";
 import { GatewayStore } from "../gateway/store.mjs";
@@ -29,6 +30,9 @@ class FakeSocket implements WaSocketLike {
   loggedOut = false;
   lookups: string[] = [];
   existing = new Set<string>();
+  sent: Array<{ jid: string; text: string }> = [];
+  /** ok = confirma com id; hang = nunca responde; noid = responde sem id. */
+  sendMode: "ok" | "hang" | "noid" = "ok";
 
   emit(event: string, payload: unknown) {
     for (const h of this.handlers.get(event) ?? []) h(payload);
@@ -42,6 +46,12 @@ class FakeSocket implements WaSocketLike {
   async onWhatsApp(...phones: string[]) {
     this.lookups.push(...phones);
     return phones.map((p) => ({ exists: this.existing.has(p), jid: `${p}@s.whatsapp.net` }));
+  }
+  async sendMessage(jid: string, content: { text: string }) {
+    this.sent.push({ jid, text: content.text });
+    if (this.sendMode === "hang") return new Promise<never>(() => {});
+    if (this.sendMode === "noid") return { key: {} };
+    return { key: { id: `WA${String(this.sent.length).padStart(6, "0")}` } };
   }
 }
 
@@ -439,33 +449,28 @@ describe("sessão do WhatsApp: ciclo de vida", () => {
   });
 });
 
-describe("consulta de número e envio (modo de teste)", () => {
+describe("consulta de número e envio simulado (modo de teste)", () => {
   it("desconectado nunca 'aceita' envio nem consulta", async () => {
     const h = makeManager();
-    assert.throws(() => h.manager.send("atlas", { to: "+5541999998888", text: "oi", clientReference: "r" }), (e: unknown) => e instanceof GatewayError && e.kind === "DISCONNECTED" && e.httpStatus === 503);
+    await assert.rejects(h.manager.send("atlas", { to: "+5541999998888", text: "oi", clientReference: "r" }), (e: unknown) => e instanceof GatewayError && e.kind === "DISCONNECTED" && e.httpStatus === 503);
     await assert.rejects(h.manager.recipient("atlas", "+5541999998888"), (e: unknown) => e instanceof GatewayError && e.kind === "DISCONNECTED");
   });
 
-  it("em modo de teste aceita, devolve id simulado e não toca o socket", async () => {
+  it("em modo de teste aceita, devolve id simulado, dispensa autorização e não toca o socket", async () => {
     const h = makeManager();
     const sock = await pair(h);
-    const r = h.manager.send("atlas", { to: "+5541999998888", text: "oi", clientReference: "ref" });
+    const r = await h.manager.send("atlas", { to: "+5541999998888", text: "oi", clientReference: "ref" });
     assert.match(r.providerMessageId, /^dryrun-/);
     assert.equal(r.dryRun, true);
     assert.equal(sock.lookups.length, 0);
-  });
-
-  it("com o modo de teste desligado o envio real continua bloqueado (501) até a política de envio", async () => {
-    const h = makeManager({ dryRun: false });
-    await pair(h);
-    assert.throws(() => h.manager.send("atlas", { to: "+5541999998888", text: "oi", clientReference: "r" }), (e: unknown) => e instanceof GatewayError && e.httpStatus === 501);
+    assert.equal(sock.sent.length, 0);
   });
 
   it("valida o destinatário e o texto", async () => {
     const h = makeManager();
     await pair(h);
     for (const bad of [{ to: "5541999998888", text: "oi" }, { to: "+55", text: "oi" }, { to: "+5541999998888", text: "   " }, { to: "+5541999998888", text: "x".repeat(4001) }]) {
-      assert.throws(() => h.manager.send("atlas", { ...bad, clientReference: "" }), (e: unknown) => e instanceof GatewayError && e.httpStatus === 400);
+      await assert.rejects(h.manager.send("atlas", { ...bad, clientReference: "" }), (e: unknown) => e instanceof GatewayError && e.httpStatus === 400);
     }
     await assert.rejects(h.manager.recipient("atlas", "abc"), (e: unknown) => e instanceof GatewayError && e.httpStatus === 400);
   });
@@ -476,6 +481,182 @@ describe("consulta de número e envio (modo de teste)", () => {
     sock.existing.add("5541988887777");
     assert.deepEqual(await h.manager.recipient("atlas", "+5541988887777"), { exists: true, jid: "5541988887777@s.whatsapp.net" });
     assert.deepEqual(await h.manager.recipient("atlas", "+5541900000000"), { exists: false, jid: null });
+  });
+});
+
+describe("envio real: só com a autorização do CRM", () => {
+  const SECRET = "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk";
+  const TO = "+5541988887777";
+  const TEXT = "Oi, tudo bem? Vi o trabalho de vocês e tenho uma ideia. Posso te mostrar?";
+
+  async function realSender(over: Partial<ConstructorParameters<typeof SessionManager>[0]> = {}) {
+    const h = makeManager({ dryRun: false, sendSecret: SECRET, sendTimeoutMs: 50, ...over });
+    const sock = await pair(h);
+    sock.existing.add("5541988887777");
+    const authFor = (ref: string, text = TEXT, to = TO, session = "atlas") => mintSendAuthorization(SECRET, { sessionId: session, to, text, reference: ref });
+    return { h, sock, authFor };
+  }
+
+  it("autorização válida envia de verdade, confirma o número antes e devolve o id do WhatsApp", async () => {
+    const { h, sock, authFor } = await realSender();
+    const r = await h.manager.send("atlas", { to: TO, text: TEXT, clientReference: "cyc-1", authorization: authFor("cyc-1") });
+    assert.deepEqual(r, { providerMessageId: "WA000001", dryRun: false });
+    assert.deepEqual(sock.lookups, ["5541988887777"], "o número é conferido no WhatsApp antes de enviar");
+    assert.deepEqual(sock.sent, [{ jid: "5541988887777@s.whatsapp.net", text: TEXT }]);
+  });
+
+  it("sem autorização, expirada, adulterada ou de outro texto/número/sessão: nada sai (403)", async () => {
+    const { h, sock, authFor } = await realSender();
+    const attempts: Array<[string, unknown]> = [
+      ["ausente", undefined],
+      ["texto diferente", authFor("cyc-2", "Outro texto qualquer, bem diferente do aprovado pelo dono.")],
+      ["outro número", authFor("cyc-2", TEXT, "+5541977776666")],
+      ["outra referência", authFor("cyc-OUTRA")],
+      ["outra sessão", authFor("cyc-2", TEXT, TO, "outra")],
+      ["expirada", mintSendAuthorization(SECRET, { sessionId: "atlas", to: TO, text: TEXT, reference: "cyc-2" }, Date.now() - 10 * 60_000)],
+      ["assinatura trocada", { expires_at: Date.now() + 60_000, signature: "0".repeat(64) }],
+      ["segredo errado", mintSendAuthorization("x".repeat(40), { sessionId: "atlas", to: TO, text: TEXT, reference: "cyc-2" })],
+    ];
+    for (const [nome, authorization] of attempts) {
+      await assert.rejects(
+        h.manager.send("atlas", { to: TO, text: TEXT, clientReference: "cyc-2", authorization: authorization as never }),
+        (e: unknown) => e instanceof GatewayError && e.httpStatus === 403,
+        nome
+      );
+    }
+    assert.equal(sock.sent.length, 0);
+    assert.equal(sock.lookups.length, 0, "nem consulta o WhatsApp antes de autorizar");
+  });
+
+  it("sem o segredo configurado o envio real é impossível (501), mesmo com tudo ligado", async () => {
+    const { h, sock } = await realSender({ sendSecret: null });
+    await assert.rejects(h.manager.send("atlas", { to: TO, text: TEXT, clientReference: "c", authorization: { expires_at: Date.now() + 1000, signature: "x" } }), (e: unknown) => e instanceof GatewayError && e.httpStatus === 501);
+    assert.equal(sock.sent.length, 0);
+  });
+
+  it("a mesma referência nunca envia duas vezes: repetir devolve o mesmo id", async () => {
+    const { h, sock, authFor } = await realSender();
+    const first = await h.manager.send("atlas", { to: TO, text: TEXT, clientReference: "cyc-3", authorization: authFor("cyc-3") });
+    const again = await h.manager.send("atlas", { to: TO, text: TEXT, clientReference: "cyc-3", authorization: authFor("cyc-3") });
+    assert.equal(again.providerMessageId, first.providerMessageId);
+    assert.equal(again.duplicate, true);
+    assert.equal(sock.sent.length, 1);
+  });
+
+  it("sem confirmação do WhatsApp (travou ou veio sem id) vira TIMEOUT e a referência NUNCA é reenviada", async () => {
+    for (const mode of ["hang", "noid"] as const) {
+      const { h, sock, authFor } = await realSender();
+      sock.sendMode = mode;
+      const ref = `cyc-${mode}`;
+      await assert.rejects(h.manager.send("atlas", { to: TO, text: TEXT, clientReference: ref, authorization: authFor(ref) }), (e: unknown) => e instanceof GatewayError && e.kind === "TIMEOUT" && e.httpStatus === 502, mode);
+      sock.sendMode = "ok";
+      await assert.rejects(h.manager.send("atlas", { to: TO, text: TEXT, clientReference: ref, authorization: authFor(ref) }), (e: unknown) => e instanceof GatewayError && e.kind === "TIMEOUT" && e.httpStatus === 409, `${mode} repetido`);
+      assert.equal(sock.sent.length, 1, "só a primeira tentativa chegou ao WhatsApp");
+    }
+  });
+
+  it("número sem WhatsApp: 422, nada enviado, e a mesma referência pode tentar de novo depois", async () => {
+    const { h, sock, authFor } = await realSender();
+    const other = "+5541900000000";
+    await assert.rejects(h.manager.send("atlas", { to: other, text: TEXT, clientReference: "cyc-4", authorization: authFor("cyc-4", TEXT, other) }), (e: unknown) => e instanceof GatewayError && e.kind === "INVALID_RECIPIENT");
+    assert.equal(sock.sent.length, 0);
+    sock.existing.add("5541900000000");
+    const r = await h.manager.send("atlas", { to: other, text: TEXT, clientReference: "cyc-4", authorization: authFor("cyc-4", TEXT, other) });
+    assert.equal(r.dryRun, false);
+    assert.equal(sock.sent.length, 1);
+  });
+
+  it("consulta indisponível: 503 transitório e a referência continua livre", async () => {
+    const { h, sock, authFor } = await realSender();
+    const original = sock.onWhatsApp.bind(sock);
+    sock.onWhatsApp = async () => undefined as never;
+    await assert.rejects(h.manager.send("atlas", { to: TO, text: TEXT, clientReference: "cyc-5", authorization: authFor("cyc-5") }), (e: unknown) => e instanceof GatewayError && e.kind === "TEMPORARY");
+    sock.onWhatsApp = original;
+    assert.equal((await h.manager.send("atlas", { to: TO, text: TEXT, clientReference: "cyc-5", authorization: authFor("cyc-5") })).dryRun, false);
+  });
+
+  it("exige referência: sem ela não há como impedir envio em dobro", async () => {
+    const { h, authFor } = await realSender();
+    await assert.rejects(h.manager.send("atlas", { to: TO, text: TEXT, clientReference: "", authorization: authFor("") }), (e: unknown) => e instanceof GatewayError && e.httpStatus === 400);
+  });
+});
+
+describe("lista de destinatários (teste restrito)", () => {
+  const SECRET = "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk";
+  const MINE = "+5541988887777";
+  const THEIRS = "+5541977776666";
+  const TEXT = "Oi, tudo bem? Vi o trabalho de vocês e tenho uma ideia. Posso te mostrar?";
+  const auth = (to: string, ref: string) => mintSendAuthorization(SECRET, { sessionId: "atlas", to, text: TEXT, reference: ref });
+
+  async function restricted(dryRun: boolean) {
+    const h = makeManager({ dryRun, sendSecret: SECRET, allowedRecipients: [MINE] });
+    const sock = await pair(h);
+    sock.existing.add("5541988887777");
+    sock.existing.add("5541977776666");
+    return { h, sock };
+  }
+
+  for (const dryRun of [true, false]) {
+    it(`com o modo de teste ${dryRun ? "LIGADO" : "DESLIGADO"}, só o número da lista recebe de verdade; os outros são simulados`, async () => {
+      const { h, sock } = await restricted(dryRun);
+      const mine = await h.manager.send("atlas", { to: MINE, text: TEXT, clientReference: "a", authorization: auth(MINE, "a") });
+      assert.equal(mine.dryRun, false);
+      const theirs = await h.manager.send("atlas", { to: THEIRS, text: TEXT, clientReference: "b", authorization: auth(THEIRS, "b") });
+      assert.equal(theirs.dryRun, true);
+      assert.match(theirs.providerMessageId, /^dryrun-/);
+      assert.deepEqual(sock.sent.map((m) => m.jid), ["5541988887777@s.whatsapp.net"], "o número fora da lista nunca chega ao socket");
+    });
+  }
+
+  it("mesmo na lista, o envio real continua exigindo a autorização do CRM", async () => {
+    const { h, sock } = await restricted(true);
+    await assert.rejects(h.manager.send("atlas", { to: MINE, text: TEXT, clientReference: "c" }), (e: unknown) => e instanceof GatewayError && e.httpStatus === 403);
+    assert.equal(sock.sent.length, 0);
+  });
+});
+
+describe("autorização de envio (pura)", () => {
+  const secret = "z".repeat(40);
+  const input = { sessionId: "atlas", to: "+5541988887777", text: "olá", reference: "r1" };
+
+  it("aceita a própria autorização e recusa qualquer campo trocado ou prazo vencido", () => {
+    const now = 1_700_000_000_000;
+    const a = mintSendAuthorization(secret, input, now);
+    assert.deepEqual(verifySendAuthorization(secret, input, a, now + 1000), { ok: true });
+    assert.equal(verifySendAuthorization(secret, { ...input, text: "olá!" }, a, now).ok, false);
+    assert.equal(verifySendAuthorization(secret, { ...input, to: "+5541988887778" }, a, now).ok, false);
+    assert.equal(verifySendAuthorization(secret, { ...input, reference: "r2" }, a, now).ok, false);
+    assert.equal(verifySendAuthorization(secret, { ...input, sessionId: "x" }, a, now).ok, false);
+    assert.deepEqual(verifySendAuthorization(secret, input, a, now + 3 * 60_000), { ok: false, reason: "expired" });
+    assert.deepEqual(verifySendAuthorization(secret, input, null, now), { ok: false, reason: "missing" });
+    assert.equal(verifySendAuthorization("outro".repeat(10), input, a, now).ok, false);
+  });
+
+  it("uma assinatura de webhook não vale como autorização de envio (prefixos disjuntos)", () => {
+    const now = 1_700_000_000_000;
+    const body = JSON.stringify(input);
+    const sig = signGatewayEvent(secret, now, body).replace("sha256=", "");
+    assert.equal(verifySendAuthorization(secret, input, { expires_at: now + 1000, signature: sig }, now).ok, false);
+  });
+});
+
+describe("estado de entrega das mensagens enviadas", () => {
+  it("é entregue ao CRM mesmo com as mensagens recebidas desligadas, e sem conteúdo", async () => {
+    const h = makeManager({ forwardMessages: false, forwardDelivery: true });
+    const sock = await pair(h);
+    h.events.length = 0;
+    sock.emit("messages.update", [{ key: { id: "WA000001", fromMe: true }, update: { status: 3 } }]);
+    sock.emit("messages.upsert", { type: "notify", messages: [{ key: { id: "IN-00000001", remoteJid: "5541988887777@s.whatsapp.net" }, message: { conversation: "oi" } }] });
+    assert.deepEqual(h.events.map((e) => e.id), ["delivery:WA000001:DELIVERED"]);
+    assert.ok(!JSON.stringify(h.events).includes("oi"));
+  });
+
+  it("com tudo desligado nada é entregue", async () => {
+    const h = makeManager({ forwardMessages: false, forwardDelivery: false });
+    const sock = await pair(h);
+    h.events.length = 0;
+    sock.emit("messages.update", [{ key: { id: "WA000001", fromMe: true }, update: { status: 3 } }]);
+    assert.equal(h.events.length, 0);
   });
 });
 

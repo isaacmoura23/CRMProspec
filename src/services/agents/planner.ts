@@ -1,6 +1,7 @@
 import "server-only";
 import { AGENTS } from "@/agents/registry";
 import { expireApprovals, submitPlannedTask } from "@/services/agents/approvals";
+import { enqueueAgentTask } from "@/services/agents/queue";
 import { logAgentEvent } from "@/services/agents/log";
 import { agentRepo } from "@/services/agents/repository";
 import { getAgentMode, isGloballyEnabled } from "@/services/agents/settings";
@@ -30,6 +31,22 @@ export async function planAgents(): Promise<PlanReport> {
   for (const agent of AGENTS) {
     const mode = await getAgentMode(agent.id);
     if (mode === "pausado") continue;
+
+    // Agente que só prepara: entra na fila direto; a aprovação é da mensagem, não da tarefa.
+    if (agent.direct) {
+      try {
+        for (const planned of await agent.plan()) {
+          // Qualquer tarefa com a mesma chave (viva, concluída ou falha) já cobre o dia.
+          if ((await repo.list("tasks", { where: { dedupe_key: planned.dedupeKey }, limit: 1 })).length > 0) continue;
+          const { created } = await enqueueAgentTask({ agent: planned.agent, kind: planned.kind, payload: planned.payload, dedupeKey: planned.dedupeKey });
+          if (created) report.enqueued += 1;
+        }
+      } catch (err) {
+        await logAgentEvent(agent.id, "error", "plan.failed", `Falha ao planejar: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      continue;
+    }
+
     // Uma proposta esperando decisão já é o pedido deste agente.
     if (mode === "aprovacao" && pending.some((a) => a.agent === agent.id)) continue;
 

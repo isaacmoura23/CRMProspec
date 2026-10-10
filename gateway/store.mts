@@ -91,6 +91,15 @@ export class GatewayStore {
         created_at INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS outbox_pending_idx ON outbox (state, id);
+      -- Idempotência do envio real: cada referência do CRM é usada uma única vez.
+      CREATE TABLE IF NOT EXISTS sends (
+        session_id TEXT NOT NULL,
+        client_reference TEXT NOT NULL,
+        state TEXT NOT NULL,
+        provider_message_id TEXT,
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY (session_id, client_reference)
+      );
     `);
   }
 
@@ -192,6 +201,36 @@ export class GatewayStore {
       this.db.exec("ROLLBACK");
       throw err;
     }
+  }
+
+  /* ------------------------- idempotência de envio ------------------------- */
+
+  getSend(sessionId: string, reference: string): { state: "sending" | "sent" | "failed"; provider_message_id: string | null } | null {
+    const row = this.db.prepare("SELECT state, provider_message_id FROM sends WHERE session_id = ? AND client_reference = ?").get(sessionId, reference);
+    return (row as unknown as { state: "sending" | "sent" | "failed"; provider_message_id: string | null } | undefined) ?? null;
+  }
+
+  /**
+   * Reserva a referência antes de chamar o WhatsApp. `false` = já existia e não
+   * pode ser reaproveitada (outra tentativa já passou por aqui). Uma tentativa
+   * que FALHOU antes de enviar (número inexistente, consulta indisponível) não
+   * enviou nada, então a mesma referência pode tentar de novo.
+   */
+  beginSend(sessionId: string, reference: string, now = Date.now()): boolean {
+    const inserted = this.db
+      .prepare("INSERT OR IGNORE INTO sends (session_id, client_reference, state, created_at) VALUES (?, ?, 'sending', ?)")
+      .run(sessionId, reference, now);
+    if (Number(inserted.changes) === 1) return true;
+    const retried = this.db
+      .prepare("UPDATE sends SET state = 'sending', created_at = ? WHERE session_id = ? AND client_reference = ? AND state = 'failed'")
+      .run(now, sessionId, reference);
+    return Number(retried.changes) === 1;
+  }
+
+  finishSend(sessionId: string, reference: string, state: "sent" | "failed", providerMessageId: string | null = null) {
+    this.db
+      .prepare("UPDATE sends SET state = ?, provider_message_id = ? WHERE session_id = ? AND client_reference = ?")
+      .run(state, providerMessageId, sessionId, reference);
   }
 
   /* ------------------------------ outbox ------------------------------ */

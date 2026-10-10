@@ -4,6 +4,7 @@ import { uid } from "@/lib/utils";
 import { logAgentEvent } from "@/services/agents/log";
 import { planAgents } from "@/services/agents/planner";
 import { runAgentQueue } from "@/services/agents/queue";
+import { processDueOutreach, reconcileOutreach } from "@/services/outreach/send";
 import { agentRepo, orgId } from "@/services/agents/repository";
 import { runnableAgents } from "@/services/agents/settings";
 
@@ -121,6 +122,12 @@ export async function runnerTick(s: Pick<RunnerState, "ticking" | "lastPlanAt" |
 
     const agents = await runnableAgents();
     if (agents.length > 0) await runAgentQueue({ agents });
+    // O envio não é uma tarefa da fila: é o processamento dos ciclos vencidos,
+    // sob a política de envio. Só roda com o Vendedor liberado.
+    if (agents.includes("seller")) {
+      await reconcileOutreach();
+      await processDueOutreach();
+    }
 
     if (now - s.lastHousekeepingAt >= HOUSEKEEPING_EVERY_MS) {
       s.lastHousekeepingAt = now;

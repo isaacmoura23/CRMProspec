@@ -1,4 +1,5 @@
 import path from "node:path";
+import { isE164 } from "../src/lib/whatsapp-send-policy";
 
 export interface GatewayConfig {
   port: number;
@@ -15,6 +16,17 @@ export interface GatewayConfig {
   forwardMessages: boolean;
   /** Quanto esperar a leitura do QR antes de desistir. */
   qrWaitMaxMs: number;
+  /** Entrega ao CRM o estado de entrega (enviado/entregue/lido) das mensagens enviadas — sem conteúdo. */
+  forwardDelivery: boolean;
+  /**
+   * Teste restrito: com a lista preenchida, SÓ estes números recebem envio real
+   * (E.164, separados por vírgula), mesmo com o modo de teste ligado. Os demais
+   * continuam simulados. É o passo 2 da ativação: a mensagem aprovada chega ao
+   * seu número e a mais ninguém.
+   */
+  allowedRecipients: string[];
+  /** Desenvolvimento: sessão e números simulados, nada sai do computador. */
+  simulate: boolean;
 }
 
 const truthy = (v: string | undefined) => v === "1" || v?.toLowerCase() === "true";
@@ -39,6 +51,14 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     }
   }
 
+  const allowedRecipients = (env.WHATSAPP_ALLOWED_RECIPIENTS ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  for (const n of allowedRecipients) {
+    if (!isE164(n)) throw new Error(`WHATSAPP_ALLOWED_RECIPIENTS: "${n}" não está em E.164 (ex.: +5541999998888).`);
+  }
+
   const port = Number(env.GATEWAY_PORT ?? 3200);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("GATEWAY_PORT inválida.");
 
@@ -53,5 +73,9 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     dbFile: path.resolve(env.GATEWAY_DB_FILE?.trim() || path.join("gateway", ".data", "gateway.db")),
     forwardMessages: truthy(env.GATEWAY_FORWARD_MESSAGES),
     qrWaitMaxMs: Math.max(30_000, Number(env.GATEWAY_QR_WAIT_MAX_MS ?? 5 * 60_000)),
+    // Ligado por padrão: o estado de entrega não carrega conteúdo e o CRM precisa dele.
+    forwardDelivery: !falsy(env.GATEWAY_FORWARD_DELIVERY),
+    allowedRecipients,
+    simulate: truthy(env.GATEWAY_SIMULATE),
   };
 }

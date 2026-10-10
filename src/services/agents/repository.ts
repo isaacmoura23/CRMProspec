@@ -1,7 +1,7 @@
 import "server-only";
 import { getDb, saveDb } from "@/lib/store";
 import { getSupabase, isSupabaseEnabled } from "@/lib/supabase";
-import { emptyAgentData, type AgentData, type AgentTask } from "@/types/agents";
+import { emptyAgentData, type AgentData, type AgentTask, type OutreachCycle } from "@/types/agents";
 
 /**
  * Persistência do AgentOS.
@@ -28,6 +28,9 @@ const TABLE: Record<AgentCollection, string> = {
   spend: "spend_ledger",
   whatsapp_link: "whatsapp_link",
   whatsapp_receipts: "whatsapp_receipts",
+  outreach_cycles: "outreach_cycles",
+  outreach_messages: "outreach_messages",
+  channel_blocklist: "channel_blocklist",
 };
 
 /** Chave natural de cada coleção (o `id` em todas, exceto onde o contrato diz outra coisa). */
@@ -68,6 +71,12 @@ export interface AgentRepo {
   claimTask(lockOwner: string, leaseMs: number, agents: readonly string[]): Promise<ClaimedTask | null>;
   extendLease(taskId: string, lockOwner: string, leaseMs: number): Promise<boolean>;
   countDueTasks(agents?: readonly string[]): Promise<number>;
+
+  /**
+   * Reivindicação atômica de um ciclo de envio: só quem o encontra `agendado`
+   * leva (agendado → reivindicado). Dois processadores nunca enviam o mesmo ciclo.
+   */
+  claimOutreachCycle(id: string): Promise<OutreachCycle | null>;
 }
 
 function nowIso() {
@@ -182,6 +191,17 @@ class LocalAgentRepo implements AgentRepo {
     if (rows.some((r) => keyOf(col, r) === keyOf(col, row) && (r as unknown as { organization_id: string }).organization_id === org)) {
       throw new UniqueViolationError(`Já existe um registro com id=${keyOf(col, row)}`);
     }
+    if (col === "outreach_cycles") {
+      const c = row as unknown as OutreachCycle;
+      const all = rows as unknown as OutreachCycle[];
+      if (all.some((r) => r.idempotency_key === c.idempotency_key)) {
+        throw new UniqueViolationError("Já existe um ciclo com esta chave de idempotência.");
+      }
+      // Um lead nunca tem duas abordagens ativas ao mesmo tempo.
+      if (all.some((r) => r.lead_id === c.lead_id && r.organization_id === c.organization_id && (r.status === "agendado" || r.status === "reivindicado"))) {
+        throw new UniqueViolationError("Este lead já tem uma abordagem em andamento.");
+      }
+    }
     if (col === "tasks") {
       const t = row as unknown as AgentTask;
       const live = (rows as unknown as AgentTask[]).some(
@@ -273,6 +293,16 @@ class LocalAgentRepo implements AgentRepo {
     if (!task || task.lock_owner !== lockOwner || task.status !== "processando") return false;
     task.locked_until = new Date(Date.now() + leaseMs).toISOString();
     return true;
+  }
+
+  async claimOutreachCycle(id: string) {
+    const cycle = this.rows("outreach_cycles").find((c) => c.id === id && c.organization_id === orgId());
+    if (!cycle || cycle.status !== "agendado") return null;
+    cycle.status = "reivindicado";
+    cycle.claimed_at = nowIso();
+    cycle.updated_at = cycle.claimed_at;
+    saveDb();
+    return cycle;
   }
 
   async countDueTasks(agents?: readonly string[]) {
@@ -430,6 +460,19 @@ class SupabaseAgentRepo implements AgentRepo {
       .select("id");
     if (error) throw error;
     return (data?.length ?? 0) === 1;
+  }
+
+  async claimOutreachCycle(id: string) {
+    const now = nowIso();
+    const { data, error } = await this.sb()
+      .from(TABLE.outreach_cycles)
+      .update({ status: "reivindicado", claimed_at: now, updated_at: now })
+      .eq("organization_id", orgId())
+      .eq("id", id)
+      .eq("status", "agendado")
+      .select();
+    if (error) throw error;
+    return data && data.length === 1 ? (data[0] as OutreachCycle) : null;
   }
 
   async countDueTasks(agents?: readonly string[]) {

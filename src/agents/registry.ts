@@ -1,6 +1,7 @@
 import "server-only";
 import { nicheAnalyst, registerNicheAnalystHandlers } from "@/agents/niche/agent";
 import { prospector, registerProspectorHandlers } from "@/agents/prospector/agent";
+import { registerSellerHandlers, seller } from "@/agents/seller/agent";
 import type { AgentDefinition } from "@/agents/types";
 import { isAgentId, type AgentId } from "@/types/agents";
 
@@ -8,7 +9,7 @@ import { isAgentId, type AgentId } from "@/types/agents";
  * Registro dos agentes, no estilo de `providers/registry.ts`. Um agente novo
  * entra aqui (definição + handlers) e na lista de `AGENT_IDS`.
  */
-export const AGENTS: AgentDefinition[] = [nicheAnalyst, prospector];
+export const AGENTS: AgentDefinition[] = [nicheAnalyst, prospector, seller];
 
 export function getAgent(id: string): AgentDefinition | undefined {
   return isAgentId(id) ? AGENTS.find((a) => a.id === id) : undefined;
@@ -26,5 +27,6 @@ export function registerAgentHandlers() {
   if (g.__agentsRegistered) return;
   registerNicheAnalystHandlers();
   registerProspectorHandlers();
+  registerSellerHandlers();
   g.__agentsRegistered = true;
 }

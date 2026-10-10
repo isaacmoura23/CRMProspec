@@ -4,6 +4,7 @@ import { gatewayEvent } from "@/lib/gateway-events";
 import { logAgentEvent } from "@/services/agents/log";
 import { agentRepo, orgId, UniqueViolationError } from "@/services/agents/repository";
 import { whatsappWebhookSecret } from "@/services/whatsapp/config";
+import { applyDeliveryStatus } from "@/services/outreach/delivery";
 import { applySessionStatus } from "@/services/whatsapp/link";
 
 /**
@@ -67,6 +68,9 @@ export async function handleGatewayWebhook(input: {
 
   if (event.type === "session.status") {
     await applySessionStatus(event);
+  } else if (event.type === "message.delivery") {
+    // Mensagens que não são do Vendedor (as que você mandou pelo celular) não casam com nada: tudo bem.
+    await applyDeliveryStatus({ providerMessageId: event.data.provider_message_id, status: event.data.status, at: event.occurred_at });
   } else {
     // O gateway só entrega mensagens quando GATEWAY_FORWARD_MESSAGES=1, e isso
     // pertence à fase do Vendedor. Recusar com 422 deixa o evento guardado como

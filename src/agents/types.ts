@@ -22,6 +22,13 @@ export interface AgentDefinition {
   /** Tipos de tarefa que ele executa. */
   kinds: string[];
   /**
+   * As tarefas planejadas entram na fila direto, em qualquer modo que não seja
+   * pausado, sem pedir aprovação por tarefa. Vale para quem só **prepara**
+   * (rascunhar uma mensagem não tem efeito externo): a aprovação fica no que
+   * tem efeito — a mensagem em si.
+   */
+  direct?: boolean;
+  /**
    * O que ele quer fazer agora, em ordem de prioridade, olhando o estado
    * atual. Não grava nada. O planejador submete no máximo uma por passada.
    */

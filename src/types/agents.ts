@@ -3,7 +3,7 @@
  * Espelha database/migrations/0005_agentes.sql.
  * ============================================================ */
 
-export const AGENT_IDS = ["niche-analyst", "prospector"] as const;
+export const AGENT_IDS = ["niche-analyst", "prospector", "seller"] as const;
 export type AgentId = (typeof AGENT_IDS)[number];
 
 export function isAgentId(value: string): value is AgentId {
@@ -133,11 +133,17 @@ export interface Approval {
   id: string;
   organization_id: string;
   agent: AgentId;
-  /** Tipo do que se aprova; hoje só tarefas de agente. */
-  kind: "agent_task";
+  /**
+   * O que se aprova: uma tarefa de agente, ou uma mensagem de WhatsApp antes de
+   * sair (aqui o pedido carrega o texto exato que será enviado).
+   */
+  kind: "agent_task" | "outreach_message";
   title: string;
   detail: string | null;
-  /** Para `agent_task`: { agent, kind, payload, dedupeKey }. */
+  /**
+   * Para `agent_task`: { agent, kind, payload, dedupeKey }.
+   * Para `outreach_message`: { lead_id, touch, phone, body }.
+   */
   payload: Record<string, unknown>;
   dedupe_key: string | null;
   status: ApprovalStatus;
@@ -148,7 +154,7 @@ export interface Approval {
   expires_at: string;
 }
 
-export type SpendKind = "places_requests" | "leads" | "llm_tokens";
+export type SpendKind = "places_requests" | "leads" | "llm_tokens" | "whatsapp_lookups";
 
 export interface SpendEntry {
   id: string;
@@ -189,6 +195,77 @@ export interface WhatsappReceipt {
   received_at: string;
 }
 
+/* ---------- Vendedor: envio por WhatsApp ---------- */
+
+/**
+ * Ciclo de envio: uma mensagem que deve sair, com tudo que decide se sai.
+ *
+ *   agendado → reivindicado → enviado | pulado | falhou | incerto | cancelado
+ *
+ * `incerto` é o envio sem confirmação (timeout): NUNCA é reenviado sozinho —
+ * reenviar pode duplicar a mensagem para o lead.
+ */
+export type OutreachCycleStatus = "agendado" | "reivindicado" | "enviado" | "pulado" | "falhou" | "incerto" | "cancelado";
+
+export interface OutreachCycle {
+  id: string;
+  organization_id: string;
+  lead_id: string;
+  /** 1 = primeira abordagem; 2 e 3 = acompanhamentos. */
+  touch: number;
+  /** Telefone em E.164, já confirmado como WhatsApp. */
+  phone: string;
+  /** Texto exato que sai (aprovado, se o modo exige aprovação). */
+  body: string;
+  status: OutreachCycleStatus;
+  /** Quando a mensagem deveria sair (base da detecção de etapa obsoleta). */
+  scheduled_for: string;
+  /** Próxima avaliação: adiar por janela, teto ou desconexão não mexe em `scheduled_for`. */
+  not_before: string;
+  claimed_at: string | null;
+  /** Só falhas técnicas contam; esperar desconexão, janela ou teto não conta. */
+  attempts: number;
+  /** Chave única do ciclo: vai ao gateway como referência e impede envio em dobro. */
+  idempotency_key: string;
+  approval_id: string | null;
+  skip_reason: string | null;
+  last_error: string | null;
+  message_id: string | null;
+  created_at: string;
+  updated_at: string;
+  sent_at: string | null;
+}
+
+export type OutreachMessageStatus = "QUEUED" | "SENT" | "DELIVERED" | "READ" | "FAILED" | "UNCERTAIN";
+
+/** Mensagem enviada ao lead, com o estado que o WhatsApp confirmou (só avança, nunca regride). */
+export interface OutreachMessage {
+  id: string;
+  organization_id: string;
+  lead_id: string;
+  cycle_id: string;
+  phone: string;
+  body: string;
+  status: OutreachMessageStatus;
+  provider_message_id: string | null;
+  error_detail: string | null;
+  created_at: string;
+  sent_at: string | null;
+  delivered_at: string | null;
+  read_at: string | null;
+}
+
+/** Quem não pode receber mensagem: pedido de parada, número sem WhatsApp, bloqueio manual. */
+export interface ChannelBlock {
+  /** Só os dígitos do telefone: a mesma pessoa em formatos diferentes é uma linha só. */
+  id: string;
+  organization_id: string;
+  phone: string;
+  reason: string;
+  source: "manual" | "opt_out" | "invalid";
+  created_at: string;
+}
+
 export interface AgentData {
   settings: AgentSettingsRow[];
   tasks: AgentTask[];
@@ -199,6 +276,9 @@ export interface AgentData {
   spend: SpendEntry[];
   whatsapp_link: WhatsappLink[];
   whatsapp_receipts: WhatsappReceipt[];
+  outreach_cycles: OutreachCycle[];
+  outreach_messages: OutreachMessage[];
+  channel_blocklist: ChannelBlock[];
 }
 
 export function emptyAgentData(): AgentData {
@@ -212,5 +292,8 @@ export function emptyAgentData(): AgentData {
     spend: [],
     whatsapp_link: [],
     whatsapp_receipts: [],
+    outreach_cycles: [],
+    outreach_messages: [],
+    channel_blocklist: [],
   };
 }

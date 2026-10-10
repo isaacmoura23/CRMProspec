@@ -4,6 +4,7 @@ import { DisconnectReason, type AuthenticationState } from "@whiskeysockets/bail
 import { motivoDeStatus } from "../src/lib/whatsapp-status";
 import { isE164, recipientJid } from "../src/lib/whatsapp-send-policy";
 import type { GatewayEvent } from "../src/lib/gateway-events";
+import { verifySendAuthorization, type SendAuthorization } from "../src/lib/gateway-send-auth";
 import { sqliteAuthState } from "./auth-state.mjs";
 import type { GatewayStore, SessionStatus } from "./store.mjs";
 
@@ -27,6 +28,7 @@ export interface WaSocketLike {
   end(error?: Error): void | Promise<void>;
   logout(): Promise<void>;
   onWhatsApp(...phoneNumbers: string[]): Promise<Array<{ exists: boolean; jid: string }> | undefined>;
+  sendMessage(jid: string, content: { text: string }): Promise<{ key: { id?: string | null } } | undefined>;
 }
 
 export type SocketFactory = (args: { sessionId: string; state: AuthenticationState }) => Promise<WaSocketLike>;
@@ -47,7 +49,7 @@ export interface PublicStatus {
 export class GatewayError extends Error {
   constructor(
     public readonly httpStatus: number,
-    public readonly kind: "DISCONNECTED" | "INVALID_RECIPIENT" | "TEMPORARY" | "PERMANENT",
+    public readonly kind: "DISCONNECTED" | "INVALID_RECIPIENT" | "TEMPORARY" | "PERMANENT" | "TIMEOUT",
     message: string
   ) {
     super(message);
@@ -62,7 +64,18 @@ export interface SessionManagerDeps {
   emit: (event: EmittedEvent) => void;
   dryRun: boolean;
   forwardMessages: boolean;
+  /** Estado de entrega das mensagens enviadas (sem conteúdo). */
+  forwardDelivery?: boolean;
   qrWaitMaxMs: number;
+  /**
+   * Segredo que valida a autorização de envio emitida pelo CRM. Sem ele o envio
+   * real é impossível, em qualquer modo.
+   */
+  sendSecret?: string | null;
+  /** Se preenchida, SÓ estes números recebem envio real; os demais são simulados. */
+  allowedRecipients?: string[];
+  /** Limite do envio ao WhatsApp antes de tratar como "sem confirmação". */
+  sendTimeoutMs?: number;
   sleep?: (ms: number) => Promise<void>;
   log?: (msg: string, extra?: Record<string, unknown>) => void;
 }
@@ -245,7 +258,7 @@ export class SessionManager {
 
     sock.ev.on("creds.update", () => saveCreds());
     sock.ev.on("connection.update", (u: ConnectionUpdate) => void this.onConnectionUpdate(s, sock, u));
-    if (this.deps.forwardMessages) this.attachMessageForwarding(s, sock);
+    if (this.deps.forwardMessages || this.deps.forwardDelivery) this.attachMessageForwarding(s, sock);
     return s;
   }
 
@@ -395,29 +408,103 @@ export class SessionManager {
   }
 
   /**
-   * Envio em modo de teste: aceita, registra e NÃO manda nada. O envio real
-   * só existe na fase da política de envio (limites, janela, aprovação);
-   * até lá, desligar o modo de teste não libera nada.
+   * Este destinatário recebe envio de verdade?
+   *
+   * Três degraus, do mais seguro ao menos:
+   *   1. modo de teste e nenhuma lista       → ninguém recebe (tudo simulado);
+   *   2. lista de destinatários preenchida   → só quem está na lista recebe;
+   *   3. modo de teste desligado, sem lista  → todos recebem (com autorização).
+   * A lista manda mesmo com o modo de teste desligado: é uma trava, não um atalho.
    */
-  send(sessionId: string, input: { to: string; text: string; clientReference: string }): { providerMessageId: string; dryRun: true } {
+  private isRealSendTo(to: string): boolean {
+    const allowed = this.deps.allowedRecipients ?? [];
+    return allowed.length > 0 ? allowed.includes(to) : !this.deps.dryRun;
+  }
+
+  /**
+   * Envia (ou simula) uma mensagem de texto.
+   *
+   * Desconectado nunca "aceita". Quando o envio é de verdade, exige a
+   * **autorização de envio** que só o CRM emite (amarrada a sessão, número,
+   * texto exato, referência e prazo), reserva a referência para nunca enviar
+   * duas vezes e confirma no WhatsApp que o número existe. Sem confirmação do
+   * WhatsApp devolve TIMEOUT — o CRM então marca "incerto" e NÃO reenvia.
+   */
+  async send(
+    sessionId: string,
+    input: { to: string; text: string; clientReference: string; authorization?: Partial<SendAuthorization> | null }
+  ): Promise<{ providerMessageId: string; dryRun: boolean; duplicate?: boolean }> {
     if (!isE164(input.to) || !input.text.trim() || input.text.length > 4_000) {
       throw new GatewayError(400, "PERMANENT", "parâmetros inválidos");
     }
-    this.connectedSocket(sessionId); // desconectado nunca "aceita"
-    if (!this.deps.dryRun) {
-      throw new GatewayError(501, "PERMANENT", "O envio real ainda não está habilitado neste gateway (depende da política de envio).");
+    const sock = this.connectedSocket(sessionId); // desconectado nunca "aceita"
+
+    if (!this.isRealSendTo(input.to)) {
+      this.log("DRY RUN: mensagem NÃO enviada", { sessionId, chars: input.text.length, ref: input.clientReference });
+      return { providerMessageId: `dryrun-${Date.now()}-${randomUUID().slice(0, 6)}`, dryRun: true };
     }
-    this.log("DRY RUN: mensagem NÃO enviada", { sessionId, chars: input.text.length, ref: input.clientReference });
-    return { providerMessageId: `dryrun-${Date.now()}-${randomUUID().slice(0, 6)}`, dryRun: true };
+
+    // ---- daqui em diante é envio de verdade ----
+    const secret = this.deps.sendSecret;
+    if (!secret) throw new GatewayError(501, "PERMANENT", "Envio real indisponível: o gateway não tem WHATSAPP_WEBHOOK_SECRET para validar a autorização do CRM.");
+    if (!input.clientReference) throw new GatewayError(400, "PERMANENT", "clientReference é obrigatório para envio real");
+    const auth = verifySendAuthorization(secret, { sessionId, to: input.to, text: input.text, reference: input.clientReference }, input.authorization);
+    if (!auth.ok) {
+      const why = auth.reason === "expired" ? "expirada" : auth.reason === "missing" ? "ausente" : "inválida";
+      throw new GatewayError(403, "PERMANENT", `Autorização de envio ${why}.`);
+    }
+
+    const { store } = this.deps;
+    const previous = store.getSend(sessionId, input.clientReference);
+    // "failed" = nada foi enviado; a mesma referência pode tentar de novo (beginSend a reabre).
+    if (previous && previous.state !== "failed") {
+      if (previous.state === "sent" && previous.provider_message_id) {
+        return { providerMessageId: previous.provider_message_id, dryRun: false, duplicate: true };
+      }
+      // Já houve uma tentativa sem desfecho conhecido: repetir pode duplicar a mensagem.
+      throw new GatewayError(409, "TIMEOUT", "Envio anterior desta referência sem confirmação; não será repetido.");
+    }
+    if (!store.beginSend(sessionId, input.clientReference)) {
+      throw new GatewayError(409, "TIMEOUT", "Esta referência já está sendo enviada.");
+    }
+
+    const found = await sock.onWhatsApp(input.to.replace(/\D/g, "")).catch(() => undefined);
+    if (!found) {
+      store.finishSend(sessionId, input.clientReference, "failed");
+      throw new GatewayError(503, "TEMPORARY", "Não foi possível verificar o destinatário no WhatsApp. Tente novamente.");
+    }
+    const jid = recipientJid(found);
+    if (!jid) {
+      store.finishSend(sessionId, input.clientReference, "failed");
+      throw new GatewayError(422, "INVALID_RECIPIENT", "Número não encontrado no WhatsApp");
+    }
+
+    let sent: Awaited<ReturnType<WaSocketLike["sendMessage"]>>;
+    try {
+      sent = await Promise.race([
+        sock.sendMessage(jid, { text: input.text }),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), this.deps.sendTimeoutMs ?? 30_000)),
+      ]);
+    } catch {
+      // A referência fica "sending": sem desfecho conhecido, nunca se repete.
+      throw new GatewayError(502, "TIMEOUT", "Sem confirmação do WhatsApp");
+    }
+    const id = sent?.key?.id;
+    if (!id) throw new GatewayError(502, "TIMEOUT", "Sem confirmação do WhatsApp");
+    store.finishSend(sessionId, input.clientReference, "sent", id);
+    this.log("mensagem enviada", { sessionId, ref: input.clientReference });
+    return { providerMessageId: id, dryRun: false };
   }
 
   /* ------------------- mensagens (só com a entrega ligada) ------------- */
 
   private attachMessageForwarding(s: Live, sock: WaSocketLike) {
-    sock.ev.on("messages.upsert", (payload: { messages: RawMessage[]; type: string }) => {
-      if (payload.type !== "notify" && payload.type !== "append") return;
-      for (const m of payload.messages) this.forwardMessage(s, m);
-    });
+    if (this.deps.forwardMessages) {
+      sock.ev.on("messages.upsert", (payload: { messages: RawMessage[]; type: string }) => {
+        if (payload.type !== "notify" && payload.type !== "append") return;
+        for (const m of payload.messages) this.forwardMessage(s, m);
+      });
+    }
 
     sock.ev.on("messages.update", (updates: Array<{ key: RawMessage["key"]; update: { status?: number | null } }>) => {
       for (const { key, update } of updates) {

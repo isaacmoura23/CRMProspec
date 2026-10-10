@@ -3,8 +3,10 @@ import {
   DEFAULT_AGENT_MODE,
   normalizeNicheAnalystConfig,
   normalizeProspectorConfig,
+  normalizeSellerConfig,
   type NicheAnalystConfig,
   type ProspectorConfig,
+  type SellerConfig,
 } from "@/agents/config";
 import { agentRepo, orgId } from "@/services/agents/repository";
 import { AGENT_IDS, GLOBAL_SETTINGS_ID, type AgentId, type AgentMode, type AgentSettingsRow } from "@/types/agents";
@@ -71,6 +73,10 @@ export async function runnableAgents(): Promise<AgentId[]> {
 
 export async function getNicheAnalystConfig(): Promise<NicheAnalystConfig> {
   return normalizeNicheAnalystConfig((await getSettingsRow("niche-analyst")).config);
+}
+
+export async function getSellerConfig(): Promise<SellerConfig> {
+  return normalizeSellerConfig((await getSettingsRow("seller")).config);
 }
 
 export async function getProspectorConfig(): Promise<ProspectorConfig> {

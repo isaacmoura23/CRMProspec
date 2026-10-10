@@ -1,5 +1,6 @@
 import { ProviderError, type ProviderErrorKind, type SendResult, type SendTextInput, type WhatsAppProvider } from "@/providers/whatsapp/types";
 import type { SessionStatus } from "@/lib/gateway-events";
+import { mintSendAuthorization } from "@/lib/gateway-send-auth";
 
 /**
  * Cliente HTTP do gateway de WhatsApp (gateway/index.mts). Portado do
@@ -37,7 +38,9 @@ export class QrGatewayWhatsAppProvider implements WhatsAppProvider {
   constructor(
     private readonly baseUrl: string,
     private readonly token: string,
-    private readonly sessionId: string
+    private readonly sessionId: string,
+    /** Segredo que assina a autorização de envio; sem ele o CRM não consegue enviar. */
+    private readonly sendSecret: string | null = null
   ) {}
 
   private async request<T>(path: string, init: RequestInit = {}, timeoutMs = QUICK_TIMEOUT_MS, scoped = true): Promise<T> {
@@ -88,9 +91,23 @@ export class QrGatewayWhatsAppProvider implements WhatsAppProvider {
   }
 
   async sendText(input: SendTextInput): Promise<SendResult> {
+    if (!this.sendSecret) {
+      throw new ProviderError("PERMANENT", "Envio indisponível: falta WHATSAPP_WEBHOOK_SECRET para autorizar o envio no gateway.", 501);
+    }
+    // O gateway só envia de verdade o que o CRM autorizou: sessão, número, texto
+    // exato e referência estão amarrados nesta assinatura, que vale poucos minutos.
+    const authorization = mintSendAuthorization(this.sendSecret, {
+      sessionId: this.sessionId,
+      to: input.to,
+      text: input.body,
+      reference: input.clientReference,
+    });
     const r = await this.request<{ providerMessageId: string; dryRun?: boolean }>(
       "/messages",
-      { method: "POST", body: JSON.stringify({ to: input.to, text: input.body, clientReference: input.clientReference }) },
+      {
+        method: "POST",
+        body: JSON.stringify({ to: input.to, text: input.body, clientReference: input.clientReference, authorization }),
+      },
       SEND_TIMEOUT_MS
     );
     if (r.dryRun || r.providerMessageId?.startsWith("dryrun-")) {

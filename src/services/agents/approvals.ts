@@ -1,7 +1,9 @@
 import "server-only";
 import { uid } from "@/lib/utils";
 import type { PlannedTask } from "@/agents/types";
+import { checkMessage, withOptOutFooter } from "@/lib/outreach-policy";
 import { logAgentEvent } from "@/services/agents/log";
+import { createOutreachCycle } from "@/services/outreach/cycles";
 import { enqueueAgentTask } from "@/services/agents/queue";
 import { agentRepo, orgId } from "@/services/agents/repository";
 import type { AgentId, AgentMode, Approval } from "@/types/agents";
@@ -77,7 +79,7 @@ export async function submitPlannedTask(planned: PlannedTask, mode: AgentMode): 
 
 export type DecisionResult = { ok: true; approval: Approval } | { ok: false; error: string };
 
-export async function decideApproval(id: string, approve: boolean, userId: string): Promise<DecisionResult> {
+export async function decideApproval(id: string, approve: boolean, userId: string, opts: { editedBody?: string } = {}): Promise<DecisionResult> {
   const repo = agentRepo();
   const approval = await repo.get("approvals", id);
   if (!approval) return { ok: false, error: "Pedido não encontrado." };
@@ -94,6 +96,9 @@ export async function decideApproval(id: string, approve: boolean, userId: strin
     await logAgentEvent(approval.agent, "info", "approval.rejected", `Recusado: ${approval.title}.`);
     return { ok: true, approval: updated ?? approval };
   }
+
+  // Mensagem de WhatsApp: aprovar cria o ciclo de envio com o texto exato (editado ou não).
+  if (approval.kind === "outreach_message") return approveOutreachMessage(approval, userId, now, opts.editedBody);
 
   const spec = approval.payload as { agent?: AgentId; kind?: string; payload?: Record<string, unknown>; dedupeKey?: string };
   if (!spec.agent || !spec.kind) return { ok: false, error: "Pedido sem tarefa associada." };
@@ -112,6 +117,37 @@ export async function decideApproval(id: string, approve: boolean, userId: strin
     task_id: task.id,
   });
   await logAgentEvent(approval.agent, "info", "approval.approved", `Aprovado: ${approval.title}.`, null, task.id);
+  return { ok: true, approval: updated ?? approval };
+}
+
+/**
+ * Aprovar uma mensagem não a envia: entrega ao envio um ciclo com o texto exato.
+ * Janela, teto, intervalo, bloqueio e conexão ainda decidem quando (e se) sai —
+ * a aprovação do dono é uma condição, não um atalho.
+ */
+async function approveOutreachMessage(approval: Approval, userId: string, now: string, editedBody?: string): Promise<DecisionResult> {
+  const repo = agentRepo();
+  const p = approval.payload as { lead_id?: string; touch?: number; phone?: string; body?: string };
+  if (!p.lead_id || !p.phone || !p.body) return { ok: false, error: "Pedido sem os dados da mensagem." };
+
+  // Texto editado pelo dono passa pelas mesmas barreiras do gerado (e o aviso de saída volta, se ele o apagou).
+  const edited = editedBody !== undefined && editedBody.trim() !== p.body.trim();
+  const body = edited ? withOptOutFooter(editedBody!) : p.body;
+  if (edited) {
+    const violation = checkMessage(body);
+    if (violation) return { ok: false, error: violation };
+  }
+
+  const cycle = await createOutreachCycle({ leadId: p.lead_id, touch: p.touch ?? 1, phone: p.phone, body, approvalId: approval.id });
+  if (!cycle) return { ok: false, error: "Este lead já tem uma abordagem em andamento." };
+
+  const updated = await repo.update("approvals", approval.id, {
+    status: "aprovado",
+    decided_by: userId,
+    decided_at: now,
+    payload: { ...approval.payload, body, edited },
+  });
+  await logAgentEvent("seller", "info", "approval.approved", `Aprovado${edited ? " (com edição)" : ""}: ${approval.title}.`, { cycle_id: cycle.id });
   return { ok: true, approval: updated ?? approval };
 }
 

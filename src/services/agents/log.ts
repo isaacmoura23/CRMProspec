@@ -22,6 +22,12 @@ export function dayKey(date: Date = new Date()): string {
   return DAY_FMT.format(date);
 }
 
+/** Amanhã às 00:05 em São Paulo (UTC-3, sem horário de verão desde 2019): quando os tetos do dia zeram. */
+export function nextDayStart(): Date {
+  const [y, m, d] = dayKey().split("-").map(Number);
+  return new Date(Date.UTC(y!, m! - 1, d! + 1, 3, 5, 0));
+}
+
 export async function logAgentEvent(
   agent: AgentEvent["agent"],
   level: AgentEventLevel,

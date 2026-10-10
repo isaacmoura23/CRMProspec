@@ -183,7 +183,7 @@ describe("configuração no CRM", () => {
 });
 
 describe("cliente do gateway", () => {
-  const provider = new QrGatewayWhatsAppProvider("http://gateway.test", "test-token", "org_atlas");
+  const provider = new QrGatewayWhatsAppProvider("http://gateway.test", "test-token", "org_atlas", "w".repeat(40));
   const original = globalThis.fetch;
   afterEach(() => {
     globalThis.fetch = original;
