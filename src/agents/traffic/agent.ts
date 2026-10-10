@@ -12,8 +12,8 @@ import { proposeBudgetChange, proposeCampaign, spendSummary } from "@/services/a
 /**
  * Agente 6 — Gestor de Tráfego.
  *
- * Propõe rascunhos de campanha a partir do perfil da empresa e, olhando os
- * relatórios, propõe pausar ou ajustar. **Só propõe**: tudo vira pedido em
+ * Propõe rascunhos de campanha (com a imagem do anúncio, feita em código) a partir do perfil da
+ * empresa e, olhando os relatórios, propõe pausar ou ajustar. **Só propõe**: tudo vira pedido em
  * `approvals`; ativar, pausar e mexer em orçamento são ações do botão, dentro dos
  * tetos de gasto conferidos no servidor. Este arquivo só importa as funções de
  * proposta e de leitura — não as de ativar, pausar ou ajustar (um teste confere).
@@ -67,9 +67,10 @@ async function propose(ctx: AgentTaskContext): Promise<void> {
   };
   const violation = checkCampaign(draft, profile.never_say, today);
   if (violation) throw new PermanentTaskError(`O rascunho não passou nas barreiras: ${violation}`);
-  const campaign = await proposeCampaign(draft);
-  ctx.setResult({ campaign_id: campaign.id, name: campaign.name, daily_budget_cents: daily });
-  await ctx.log("info", `Propôs o rascunho "${campaign.name}" (${formatBrl(daily)} por dia).`);
+  // A imagem do anúncio é da própria empresa, feita em código; fica "pendente" até você aprovar a imagem.
+  const campaign = await proposeCampaign(draft, new Date(), { builder: cfg.creative_builder, budgetUsd: cfg.creative_budget_usd });
+  ctx.setResult({ campaign_id: campaign.id, name: campaign.name, daily_budget_cents: daily, creative_id: campaign.creative_id });
+  await ctx.log("info", `Propôs o rascunho "${campaign.name}" (${formatBrl(daily)} por dia) com a imagem do anúncio.`);
 }
 
 /** Olha os relatórios e propõe — nunca executa — pausar o que gasta sem resultado ou tudo o que passou do teto. */

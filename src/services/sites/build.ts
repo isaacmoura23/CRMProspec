@@ -3,6 +3,8 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { generateSite } from "@/lib/site-generate";
+import { findClaude, runClaudeHeadless, type ClaudeRunner } from "@/services/claude/headless";
+import { buildWithClaude } from "@/services/sites/claude-builder";
 import { SiteBuildGateError, siteBuildGate, type SiteGateResult } from "@/lib/site-gate";
 import { verifySiteStatic } from "@/lib/site-verify";
 import { getDb, saveDb } from "@/lib/store";
@@ -122,11 +124,14 @@ export async function enqueueSiteBuild(leadId: string, opts: { now?: Date; creat
 /* ------------------------------------------------------------------ */
 
 /** Só para testes: troca o navegador real por um simulado quando a chamada não passa o seu. */
-export const siteBuildTestHooks: { browser?: BrowserDeps } = {};
+export const siteBuildTestHooks: { browser?: BrowserDeps; claude?: ClaudeRunner; claudeAvailable?: boolean } = {};
 
 export interface RunBuildDeps {
   now?: () => Date;
   browser?: BrowserDeps;
+  /** Executor do Claude Code (nos testes, um simulado). */
+  claude?: ClaudeRunner;
+  claudeAvailable?: boolean;
 }
 
 async function fail(build: SiteBuild, error: string, checks: SiteCheck[] = [], now: Date = new Date()): Promise<SiteBuild> {
@@ -159,19 +164,66 @@ export async function runSiteBuild(buildId: string, deps: RunBuildDeps = {}): Pr
   fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(dir, { recursive: true });
 
-  const site = generateSite(profile);
-  const hash = crypto.createHash("sha256").update(site.html).digest("hex");
-  fs.writeFileSync(path.join(dir, "index.html"), site.html, "utf8");
-  fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify({ lead_id: lead.id, build_id: build.id, builder: "modelos", content_hash: hash, built_at: clock().toISOString(), dossier_updated_at: dossier!.updated_at }, null, 2), "utf8");
-
-  await repo.update("site_builds", build.id, { status: "verificando", content_hash: hash, updated_at: clock().toISOString() });
-  const checks = verifySiteStatic(site.html, profile);
   const cfg = await getSiteBuilderConfig();
-  const browser = await verifyInBrowser(site.html, dir, deps.browser ?? siteBuildTestHooks.browser);
-  for (const c of browser.checks) {
-    // Sem navegador e com a exigência desligada, registra o fato sem barrar.
-    checks.push(!browser.available && !cfg.require_browser_check ? { ...c, ok: true, detail: `Ignorado por configuração. ${c.detail}` } : c);
+  const browserDeps = deps.browser ?? siteBuildTestHooks.browser;
+  /** A MESMA verificação para qualquer construtor: arquivo (estática) + navegador. */
+  const verifyAll = async (html: string): Promise<{ checks: SiteCheck[]; screenshots: Array<{ file: string }> }> => {
+    const out = verifySiteStatic(html, profile);
+    const browser = await verifyInBrowser(html, dir, browserDeps);
+    for (const c of browser.checks) {
+      // Sem navegador e com a exigência desligada, registra o fato sem barrar.
+      out.push(!browser.available && !cfg.require_browser_check ? { ...c, ok: true, detail: `Ignorado por configuração. ${c.detail}` } : c);
+    }
+    return { checks: out, screenshots: browser.screenshots };
+  };
+
+  // Ponto de partida e rede de segurança: o gerador por modelos (determinístico).
+  const site = generateSite(profile);
+  let html = site.html;
+  let builder: SiteBuild["builder"] = "modelos";
+  let costUsd = 0;
+  let notes: SiteCheck[] = [];
+  if (cfg.builder === "claude-code") {
+    const runner = deps.claude ?? siteBuildTestHooks.claude ?? runClaudeHeadless;
+    const available = deps.claudeAvailable ?? siteBuildTestHooks.claudeAvailable ?? findClaude() !== null;
+    if (!available) {
+      notes = [{ name: "construtor Claude Code", ok: true, detail: "Claude Code não encontrado nesta máquina; a página saiu do gerador por modelos." }];
+    } else {
+      await repo.update("site_builds", build.id, { status: "construindo", builder: "claude-code", updated_at: clock().toISOString() });
+      const res = await buildWithClaude({
+        buildId: build.id,
+        profile,
+        baseline: site.html,
+        runner,
+        verify: async (candidate) => (await verifyAll(candidate)).checks,
+        budgetUsd: cfg.claude_budget_usd,
+        timeoutMs: cfg.claude_timeout_min * 60_000,
+        repairRounds: cfg.claude_repair_rounds,
+        model: cfg.claude_model || undefined,
+        deadline: gate.deadline,
+        now: clock,
+      });
+      costUsd = res.costUsd;
+      if (res.ok) {
+        html = res.html;
+        builder = "claude-code";
+        notes = [{ name: "construtor Claude Code", ok: true, detail: `Página escrita pelo Claude Code em ${res.rounds} rodada(s)${res.skills.length ? ` com as skills ${res.skills.join(", ")}` : ""}; US$ ${res.costUsd.toFixed(2)}.` }];
+      } else {
+        notes = [{ name: "construtor Claude Code", ok: true, detail: `Não entregue (${res.reason}) A página saiu do gerador por modelos.` }];
+        await logAgentEvent("site-builder", "warn", "site.builder_fallback", `Claude Code não entregou a prévia de ${lead.company_name}: ${res.reason}`, { build_id: build.id, lead_id: lead.id, cost_usd: res.costUsd });
+      }
+    }
   }
+
+  const hash = crypto.createHash("sha256").update(html).digest("hex");
+  fs.writeFileSync(path.join(dir, "index.html"), html, "utf8");
+  fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify({ lead_id: lead.id, build_id: build.id, builder, content_hash: hash, built_at: clock().toISOString(), dossier_updated_at: dossier!.updated_at }, null, 2), "utf8");
+
+  await repo.update("site_builds", build.id, { status: "verificando", builder, content_hash: hash, cost_usd: costUsd, updated_at: clock().toISOString() });
+  // Verificação final da página que vai ao ar (grava as capturas na pasta da prévia).
+  const verified = await verifyAll(html);
+  const checks = [...notes, ...verified.checks];
+  const browserShots = verified.screenshots;
 
   const failed = checks.filter((c) => !c.ok);
   if (failed.length > 0) return fail(build, `Verificação reprovada: ${failed.map((c) => c.name).join("; ")}.`, checks, clock());
@@ -184,7 +236,7 @@ export async function runSiteBuild(buildId: string, deps: RunBuildDeps = {}): Pr
   const ready = await repo.update("site_builds", build.id, {
     status: "pronto",
     checks,
-    screenshots: browser.screenshots.map((s) => s.file),
+    screenshots: browserShots.map((s) => s.file),
     error: null,
     ready_at: now.toISOString(),
     expires_at: keepUntil,

@@ -42,10 +42,16 @@ export const runBrowser: BrowserRunner = (browser, args, timeoutMs) =>
     });
   });
 
-const MEASURE = `<script>(function(){var errs=[];window.addEventListener('error',function(e){errs.push(String(e.message||'erro'))});
+/** Funções de contraste de texto (ES5), reaproveitadas pela verificação das artes: `lowContrast()` devolve até 3 exemplos abaixo de 3:1. */
+export const CONTRAST_JS = `function lum(c){var m=c&&c.match(/[\\d.]+/g);if(!m||m.length<3)return null;var v=[0,1,2].map(function(i){var x=parseFloat(m[i])/255;return x<=.03928?x/12.92:Math.pow((x+.055)/1.055,2.4)});return{l:.2126*v[0]+.7152*v[1]+.0722*v[2],a:m.length>3?parseFloat(m[3]):1}}
+function bgOf(el){while(el&&el.nodeType===1){var s=getComputedStyle(el);var b=lum(s.backgroundColor);if(b&&b.a>.9)return b.l;if(s.backgroundImage&&s.backgroundImage!=='none')return null;el=el.parentElement}return 1}
+function lowContrast(){var bad=[];document.querySelectorAll('body *').forEach(function(el){if(bad.length>=3)return;var own='';for(var i=0;i<el.childNodes.length;i++){if(el.childNodes[i].nodeType===3)own+=el.childNodes[i].nodeValue}own=own.replace(/\\s+/g,' ').trim();if(!own)return;var s=getComputedStyle(el);if(s.display==='none'||s.visibility==='hidden')return;var fg=lum(s.color),bg=bgOf(el);if(!fg||bg===null||fg.a<.9)return;var hi=Math.max(fg.l,bg),lo=Math.min(fg.l,bg);if((hi+.05)/(lo+.05)<3)bad.push(el.tagName.toLowerCase()+': '+own.slice(0,28))});return bad}window.addEventListener('error',function(e){errs.push(String(e.message||'erro'))});`;
+
+const MEASURE = `<script>(function(){var errs=[];
+${CONTRAST_JS}
 function done(){var bad=[];document.querySelectorAll('a[href^="#"]').forEach(function(a){var id=a.getAttribute('href').slice(1);if(id&&!document.getElementById(id))bad.push(id)});
 var r={w:window.innerWidth,sw:document.documentElement.scrollWidth,overflow:document.documentElement.scrollWidth>window.innerWidth+1,badAnchors:bad,errors:errs,h1:document.querySelectorAll('h1').length};
-document.title='ATLAS_VERIFY:'+JSON.stringify(r)}
+r.lowContrast=lowContrast();document.title='ATLAS_VERIFY:'+JSON.stringify(r)}
 window.addEventListener('load',function(){setTimeout(done,300)})})();</script>`;
 
 export interface Measure {
@@ -55,6 +61,8 @@ export interface Measure {
   badAnchors: string[];
   errors: string[];
   h1: number;
+  /** Textos com contraste abaixo de 3:1 contra o fundo (até 3 exemplos). Ausente em medições antigas. */
+  lowContrast?: string[];
 }
 
 /** Lê o resultado que o script de medição deixou no título da página. */
@@ -141,6 +149,8 @@ export async function verifyInBrowser(html: string, outDir: string, deps: Browse
       ok: Boolean(mobile && !mobile.overflow),
       detail: mobile ? (mobile.overflow ? `A página tem ${mobile.sw}px de largura numa tela de ${mobile.w}px.` : `Cabe nos ${mobile.w}px do celular.`) : "Não foi possível medir.",
     });
+    const faint = [...(mobile?.lowContrast ?? []), ...(desktop?.lowContrast ?? [])];
+    checks.push({ name: "texto legível (contraste)", ok: measured && faint.length === 0, detail: faint.length === 0 ? "Todo texto tem contraste de pelo menos 3:1 com o fundo." : `Contraste baixo em: ${[...new Set(faint)].slice(0, 3).join(" | ")}` });
     checks.push({ name: "âncoras sem quebra", ok: Boolean(mobile && desktop && mobile.badAnchors.length === 0 && desktop.badAnchors.length === 0), detail: mobile?.badAnchors.length ? `Âncoras quebradas: ${mobile.badAnchors.join(", ")}` : "Todas as âncoras levam a uma seção." });
 
     // Capturas de tela (a prévia do dono ver, não parte do site publicado).

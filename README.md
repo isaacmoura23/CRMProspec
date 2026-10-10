@@ -306,7 +306,21 @@ completo, riscos e operação em [`docs/WHATSAPP_LOCAL.md`](docs/WHATSAPP_LOCAL.
 Sem `GOOGLE_PLACES_API_KEY` os agentes usam o diretório de demonstração e tudo
 que produzem é marcado como **dados de demonstração**.
 
-**Supabase:** rode `database/migrations/0005_agentes.sql`, `0006_whatsapp.sql`, `0007_vendedor.sql`, `0008_conversa.sql`, `0009_dossie.sql`, `0010_sites.sql` e `0011_social_trafego.sql` (já estão em
+**Varredura do Brasil e Lista de prospecção** (`/prospeccao`): o Prospectador percorre nicho × cidade (capitais primeiro), só
+empresas sem site, e mostra nome, telefone, Instagram (quando achado) e o link do Maps, com CSV. Risco dos termos do Google em
+[`docs/PROSPECCAO_GOOGLE.md`](docs/PROSPECCAO_GOOGLE.md).
+
+**Construtor Claude Code (Agente 5):** em "Quem escreve a página" você pode trocar o gerador por modelos pelo Claude Code em
+modo restrito (só arquivos, sem internet nem comandos, com skills de design fixadas por hash). A verificação é a mesma e, se
+falhar, a prévia sai pelo gerador por modelos. Instale as skills com `node scripts/instalar-skills-sites.mjs`.
+
+**Criativos e calendário (Agentes 6 e 7):** as artes (Feed, Stories, anúncio) e os vídeos (Reels) da própria empresa são feitos em
+código — HTML/SVG renderizado pelo Chrome/Edge e vídeo por cenas + ffmpeg —, sem API paga. Cada post e cada campanha nasce com a
+arte, que só ganha endereço público (`/midia/…`) depois do seu clique. No calendário editorial, **"Aprovar e publicar"** sai agora e
+**"Aprovar e agendar"** sai na hora marcada, sempre item a item. Para o Instagram buscar a mídia, defina `PUBLIC_BASE_URL`
+(https, ou um túnel); sem isso o post fica "sem hospedagem". Checklist completo em [`docs/ENTREGA_LOCAL.md`](docs/ENTREGA_LOCAL.md).
+
+**Supabase:** rode `database/migrations/0005_agentes.sql` até `0013_criativos.sql` (já estão em
 `database/setup-producao.sql`) e confira com `node scripts/verificar-supabase.mjs`.
 Sem Supabase tudo funciona no `.data/db.json`.
 

@@ -1,4 +1,4 @@
-# Estado do projeto — 21/09/2026
+# Estado do projeto — 10/10/2026
 
 Registro do que está pronto, do que está pela metade e do que falta, para
 retomar sem precisar reconstruir o contexto.
@@ -322,6 +322,8 @@ retomar sem precisar reconstruir o contexto.
   `scripts/set-instagram-token.mjs` grava ID e token sem expor o token. Migração `0011_social_trafego.sql`
   (já no `setup-producao.sql` e no verificador).
 - Testes: `npm test` (461), `tsc`, `lint` e `build` limpos.
+- **(Atualizado na fase 6:** a arte do post agora é gerada em código e o agente propõe pelo calendário; o parágrafo abaixo
+  descreve o que valia na fase 5.)
 - **Desvios da especificação:** o Instagram é falado direto pela API Graph (HTTP, com o token no cabeçalho), não por
   um servidor MCP Python (`ig-mcp`) — a garantia é a mesma e não há processo extra; o AdKit é um serviço pago e
   hospedado cujo protocolo não dá para verificar daqui, então o Agente 6 entrega o núcleo (rascunhos, aprovação,
@@ -330,6 +332,78 @@ retomar sem precisar reconstruir o contexto.
 - **Não verificado:** publicar de verdade no Instagram (não há conta Business nem token neste ambiente: o cliente HTTP
   e os dois passos da API foram verificados contra simulações), a leitura real do perfil e dos posts, e a migração
   `0011` no Supabase.
+
+### AgentOS: validação, criativos e calendário — fase 6 (10/10/2026)
+Escopo: prospecção do Brasil inteiro, prova de que a autonomia máxima do Vendedor é autônoma, construtor Claude Code
+no Agente 5, criativos feitos em código (imagem e vídeo) e calendário editorial com agendamento. Testes: `npm test`
+(567), `tsc`, `lint` e `build` limpos. Migrações novas: `0012_prospeccao.sql` e `0013_criativos.sql` (já no
+`setup-producao.sql` e no verificador). Passo a passo de uso em [`docs/ENTREGA_LOCAL.md`](docs/ENTREGA_LOCAL.md).
+
+- **Agente 2 — varredura do Brasil e "Lista de prospecção".** Varredura contínua nicho × cidade (112 cidades: as 27 capitais e as grandes,
+  capitais primeiro), só empresas **sem site**, ativa e com telefone; registra a cobertura em
+  `prospect_coverage` e respeita os tetos diários. Desligada por padrão (cada busca ao Google é paga; "todo o Brasil"
+  não cabe numa execução — ver `docs/PROSPECCAO_GOOGLE.md`, que também documenta o **risco dos Termos do Google
+  Maps Platform** (só o `place_id` pode ser guardado sem prazo) e uma proposta de mínimo a guardar, **que depende de
+  uma decisão sua**). Tela `/prospeccao` (nome, telefone, Instagram só quando achado, link do Maps, cobertura) e
+  exportação CSV (`;`, BOM, fórmula neutralizada).
+- **Agente 4 — autonomia máxima provada.** `tests/funil-autonomia.test.ts` roda, em modo automático e com o WhatsApp
+  simulado: o relógio dispara a prospecção; dossiê; abordagem, resposta e marcação de reunião **sem nenhum pedido de
+  aprovação**; prévia do site; e prova que (a) a única mensagem ao seu WhatsApp vinda do Vendedor é a da reunião (mais o
+  aviso da prévia, que é do Agente 5), (b) mídia, mensagem vaga e dúvida fora do roteiro vão **só ao painel e ao sino**,
+  (c) "pare" bloqueia na entrada **antes de qualquer modelo** (com um modelo configurado, nenhuma chamada saiu), (d) o
+  interruptor geral para tudo e (e) os Agentes 6 e 7, em automático, **só propõem**: nenhuma escrita foi ao Instagram,
+  nenhuma campanha ativou, nenhuma mídia foi servida de fora. As travas (política de envio, janela, teto, bloqueio) não
+  são permissão e continuam valendo.
+- **Agente 5 — construtor Claude Code, ao lado do gerador por modelos** (config "Quem escreve a página"; padrão:
+  modelos). O Claude Code roda como `claude -p --restricted --strict-mcp-config --permission-mode dontAsk --tools
+  Read,Write,Edit,Glob,Grep --max-budget-usd …` numa pasta isolada (`.data/site-work/<build>/`) com o perfil comprovado,
+  as regras e as **skills de design fixadas**; sem Bash, sem internet, sem MCP, com o ambiente **sem as chaves do CRM**.
+  **A mesma verificação** (estática + navegador) vale; se reprovar, ele recebe a lista exata do que falhou, até esgotar as
+  rodadas, o prazo ou o teto de gasto (por prévia, US$ 1,50 por padrão); se falhar, a prévia sai pelo gerador por
+  modelos e o motivo fica registrado. Skills fixadas por commit e SHA-256 em `docs/SITES_SKILLS.lock.json` (emil-design-eng,
+  emil-animate, impeccable, taste-skill; só texto, nenhum script executado; `node scripts/instalar-skills-sites.mjs` recusa
+  arquivo com hash diferente). **Verificado de verdade:** uma chamada real (empresa fictícia) devolveu uma página que
+  passou na verificação em 1 rodada, 37 s, US$ 0,10. A verificação no navegador ganhou **contraste de texto** (≥ 3:1) —
+  achado ao olhar a página que o Claude Code escreveu.
+- **Criativos da própria empresa, em código** (`src/services/creatives/`, skill de projeto
+  `.claude/skills/criativos/SKILL.md`): HTML/SVG renderizado em PNG pelo Chrome/Edge headless (Feed 1080×1350, Stories
+  1080×1920, anúncio 1080×1080) e **vídeo como motion graphics** (Reels 1080×1920: cenas em PNG → ffmpeg com zoom lento e
+  transições, H.264 yuv420p, áudio mudo, ~9,5 s). Sem API paga, sem foto, sem pessoa, sem marca de terceiros. Três
+  composições ("Outro visual" troca). Verificação: só o texto que a empresa já disse, sem script/imagem/link/recurso
+  externo, tamanho exato, texto dentro da margem de segurança do app (Stories/Reels deixam topo e rodapé livres),
+  contraste, PNG de verdade, `ffprobe` (codec, dimensões, fps, duração, áudio, peso) e decodificação completa. Opcional:
+  o Claude Code escreve a arte livre (imagens), com a mesma verificação e queda para o modelo. **Só é servido de fora
+  depois de aprovado** (`/midia/<token>/<arquivo>`, token de 192 bits, 404 antes do clique e depois do prazo, com Range
+  para vídeo).
+- **Agente 6 — a campanha nasce com a imagem** (1080×1080, "pendente"): **aprovar a imagem é um clique, ativar a
+  campanha é outro**, dentro dos tetos; com imagem, a campanha **só ativa com a imagem aprovada e íntegra** (o servidor
+  confere o hash do arquivo). Campanhas antigas, sem imagem, não são afetadas.
+- **Agente 7 — calendário editorial** (Feed, Reels, Stories; padrão 3/1/2 por semana, 7 dias à frente, horários 12h/18h/9h
+  em Brasília; um post — mesmo recusado ou expirado — cobre a vaga do seu dia). Cada post nasce com a arte; **"Aprovar e
+  publicar"** sai agora e **"Aprovar e agendar"** sai na hora marcada, **item a item, nunca em lote** (não existe ação
+  que receba vários). O **publicador agendado** (`publishDueScheduled`, chamado só pelo runner, só com o agente liberado)
+  reconfere tudo antes de sair: legenda nas barreiras, mídia íntegra e com hospedagem, resumo (SHA-256) do que você
+  aprovou, janela de atraso (3 h; passou, avisa em vez de publicar fora de hora) e a **cota diária da API**
+  (`content_publishing_limit`); reivindica o post de forma atômica (duas rodadas, uma publicação). Reels esperam o vídeo
+  ficar `FINISHED`; erro ou demora **não** são incerteza (nada foi publicado); só o timeout da publicação em si é incerto.
+  Sem `PUBLIC_BASE_URL` https (ou túnel) o post fica **"sem hospedagem"**: dá para revisar e aprovar a arte, não publicar.
+- **Lacunas de fases anteriores achadas e corrigidas:** `expireStalePosts`, `expireStaleCampaigns` e
+  `reconcileStuckPublishing` existiam mas **ninguém as chamava** (proposta nunca expirava sozinha; post preso em
+  "publicando" nunca virava incerto). Agora o runner as chama, e as linhas gravadas antes da fase 6 (post sem formato,
+  campanha sem imagem) são completadas na leitura.
+- **Decisões abertas para você:** (1) o aviso "prévia pronta" também vai ao seu WhatsApp (é do Agente 5; a única
+  interrupção do **Vendedor** é a reunião) — se quiser só sino, é desligar `queuePreviewNotice`; (2) o que guardar do
+  Google Places (`docs/PROSPECCAO_GOOGLE.md`); (3) a fonte de demonstração gera leads que o envio e o site recusam de
+  propósito, então o funil de teste usa um lead criado como o Agente 2 criaria com dado real.
+- **Não verificado:** publicar de verdade no Instagram (feed, Reels, Stories e a cota: não há conta Business nem token
+  aqui; o cliente HTTP, o polling do vídeo e os passos foram verificados contra simulações da API Graph); o envio real
+  de WhatsApp (passo 3 da ativação é seu); a migração `0012`/`0013` no Supabase; o construtor Claude Code numa
+  prévia real de cliente (só numa empresa fictícia); o Claude Code escrevendo **artes** (só o caminho simulado e o
+  modelo foram exercitados com Chrome real); custos reais de uso contínuo.
+- **Verificado no app real (preview na porta 3100, com Chrome e ffmpeg desta máquina):** o runner gerou 4 propostas com
+  arte (3 imagens, 1 Reels de 9,5 s, 37 verificações), o calendário aparece com as vagas, o vídeo toca no painel, a
+  campanha proposta veio com a imagem e o botão "Ativar" ficou desligado até aprovar a imagem; sem rolagem lateral no
+  celular. Os dados de teste foram desfeitos (`.data/db.json` restaurado).
 
 ## Pela metade — Supabase
 

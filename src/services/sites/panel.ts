@@ -3,7 +3,9 @@ import type { SiteBuilderConfig } from "@/agents/config";
 import { getDb } from "@/lib/store";
 import { agentRepo } from "@/services/agents/repository";
 import { getSiteBuilderConfig } from "@/services/agents/settings";
+import { findClaude } from "@/services/claude/headless";
 import { findBrowser } from "@/services/presence/visual";
+import { installedSkills } from "@/services/sites/claude-builder";
 import { evaluateGate } from "@/services/sites/build";
 import type { SiteBuild } from "@/types/agents";
 
@@ -21,6 +23,10 @@ export interface SiteBuilderPanelData {
   config: SiteBuilderConfig;
   rows: BuildRow[];
   browserFound: boolean;
+  /** O comando `claude` está nesta máquina. */
+  claudeFound: boolean;
+  /** Skills de design fixadas que estão instaladas (docs/SITES_SKILLS.lock.json). */
+  skillsInstalled: string[];
   /** Leads com reunião marcada e a porta ainda fechada, com o motivo. */
   waiting: Array<{ lead_id: string; lead_name: string; meeting_at: string; reason: string }>;
 }
@@ -54,5 +60,5 @@ export async function getSiteBuilderPanel(): Promise<SiteBuilderPanelData> {
     const { gate } = await evaluateGate(m.lead_id, now);
     if (!gate.ok) waiting.push({ lead_id: m.lead_id, lead_name: leads.get(m.lead_id) ?? "Lead removido", meeting_at: m.at, reason: gate.reason });
   }
-  return { config, rows, browserFound: Boolean(findBrowser()), waiting };
+  return { config, rows, browserFound: Boolean(findBrowser()), claudeFound: findClaude() !== null, skillsInstalled: installedSkills(), waiting };
 }

@@ -9,9 +9,21 @@ import { getAdminUser, getWriterUser } from "@/lib/auth";
 import { ADMIN_DENIED, WRITE_DENIED } from "@/lib/permissions";
 import { dayKey, logAgentEvent } from "@/services/agents/log";
 import { enqueueAgentTask } from "@/services/agents/queue";
-import { getAgentMode, isGloballyEnabled, saveSettings } from "@/services/agents/settings";
-import { activateCampaign, approveCampaignDraft, endCampaign, pauseCampaign, recordReport, rejectCampaignDraft, setCampaignBudget } from "@/services/ads/campaigns";
-import { approveAndPublish, editPost, markNotPublished, reconcileUncertainPost, rejectPost, reopenFailedPost } from "@/services/social/posts";
+import { getAgentMode, getSocialConfig, getTrafficConfig, isGloballyEnabled, saveSettings } from "@/services/agents/settings";
+import { parseBrasiliaLocal } from "@/lib/brasilia-time";
+import {
+  activateCampaign,
+  approveCampaignCreative,
+  approveCampaignDraft,
+  endCampaign,
+  pauseCampaign,
+  recordReport,
+  regenerateCampaignCreative,
+  rejectCampaignCreative,
+  rejectCampaignDraft,
+  setCampaignBudget,
+} from "@/services/ads/campaigns";
+import { approveAndPublish, approveAndSchedule, cancelSchedule, editPost, markNotPublished, reconcileUncertainPost, regeneratePostCreative, rejectPost, reopenFailedPost } from "@/services/social/posts";
 import type { AgentId } from "@/types/agents";
 
 /**
@@ -33,13 +45,47 @@ function refresh() {
 
 /* ------------------------------ Instagram ------------------------------ */
 
-/** "Aprovar e publicar": a única passagem que publica. */
+/** "Aprovar e publicar": publica agora, este post, depois do seu clique. */
 export async function approveAndPublishPost(postId: string): Promise<ActionResult> {
   const admin = await getAdminUser();
   if (!admin) return fail(ADMIN_DENIED);
   const r = await approveAndPublish(String(postId), admin.id);
   refresh();
-  return r.ok ? ok("Post publicado no Instagram.") : fail(r.error);
+  return r.ok ? ok("Publicado no Instagram.") : fail(r.error);
+}
+
+const scheduleSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/);
+
+/**
+ * "Aprovar e agendar": aprova ESTE post para a data escolhida (horário de Brasília). Um post por clique,
+ * nunca em lote: não existe ação que agende vários. O publicador reconfere tudo na hora de sair.
+ */
+export async function scheduleSocialPost(postId: string, when: string): Promise<ActionResult> {
+  const admin = await getAdminUser();
+  if (!admin) return fail(ADMIN_DENIED);
+  const parsed = scheduleSchema.safeParse(when);
+  const at = parsed.success ? parseBrasiliaLocal(parsed.data) : null;
+  if (!at) return fail("Escolha a data e a hora do agendamento.");
+  const r = await approveAndSchedule(String(postId), admin.id, at);
+  refresh();
+  return r.ok ? ok("Agendado. Sai na hora marcada, depois de o sistema reconferir tudo.") : fail(r.error);
+}
+
+export async function cancelSocialSchedule(postId: string): Promise<ActionResult> {
+  const admin = await getAdminUser();
+  if (!admin) return fail(ADMIN_DENIED);
+  const done = await cancelSchedule(String(postId));
+  refresh();
+  return done ? ok("Agendamento cancelado: o post voltou a esperar você.") : fail("Só um post agendado pode ser desagendado (talvez já tenha saído).");
+}
+
+/** Outra composição da arte do post (a anterior é descartada). */
+export async function regenerateSocialArt(postId: string): Promise<ActionResult> {
+  const user = await getWriterUser();
+  if (!user) return fail(WRITE_DENIED);
+  const r = await regeneratePostCreative(String(postId));
+  refresh();
+  return r.ok ? ok(r.creative.status === "falhou" ? `A arte não saiu: ${r.creative.error ?? "veja as verificações"}` : "Nova arte pronta.") : fail(r.error);
 }
 
 const editSchema = z.object({ caption: z.string().max(5000).optional(), image_url: z.string().max(1000).nullable().optional() });
@@ -86,14 +132,29 @@ export async function markSocialPostNotPublished(postId: string): Promise<Action
   return done ? ok("Marcado como não publicado.") : fail("Este post não está aguardando conferência.");
 }
 
-const socialConfigSchema = z.object({ max_pending_posts: z.number().int().min(1).max(10), proposal_ttl_days: z.number().int().min(1).max(14), hashtags: z.array(z.string().max(40)).max(8) });
+const socialConfigSchema = z.object({
+  max_pending_posts: z.number().int().min(1).max(20),
+  proposal_ttl_days: z.number().int().min(1).max(14),
+  hashtags: z.array(z.string().max(40)).max(8),
+  calendar_days: z.number().int().min(1).max(14).optional(),
+  weekly_feed: z.number().int().min(0).max(7).optional(),
+  weekly_reel: z.number().int().min(0).max(7).optional(),
+  weekly_story: z.number().int().min(0).max(14).optional(),
+  feed_hour: z.number().int().min(0).max(23).optional(),
+  reel_hour: z.number().int().min(0).max(23).optional(),
+  story_hour: z.number().int().min(0).max(23).optional(),
+  late_window_hours: z.number().int().min(1).max(24).optional(),
+  creative_builder: z.enum(["modelos", "claude-code"]).optional(),
+  creative_budget_usd: z.number().min(0.1).max(5).optional(),
+});
 
 export async function saveSocialConfig(input: unknown): Promise<ActionResult> {
   const admin = await getAdminUser();
   if (!admin) return fail(ADMIN_DENIED);
   const parsed = socialConfigSchema.safeParse(input);
   if (!parsed.success) return fail("Configuração inválida.");
-  await saveSettings("social-media", { config: { ...normalizeSocialConfig(parsed.data) } });
+  // Mescla com o que já está salvo: campos não enviados não voltam ao padrão.
+  await saveSettings("social-media", { config: { ...normalizeSocialConfig({ ...(await getSocialConfig()), ...parsed.data }) } });
   await logAgentEvent("social-media", "info", "agent.config", `${admin.name} atualizou a configuração de Mídias Sociais.`);
   refresh();
   return ok("Configuração salva.");
@@ -107,6 +168,31 @@ export async function approveAdCampaign(campaignId: string): Promise<ActionResul
   const r = await approveCampaignDraft(String(campaignId), admin.id);
   refresh();
   return r.ok ? ok("Rascunho aprovado. Ainda não gasta nada: ativar é outro clique.") : fail(r.error);
+}
+
+/** Aprovar a IMAGEM do anúncio: um clique; ativar a campanha é outro, dentro dos tetos. */
+export async function approveAdCreative(campaignId: string): Promise<ActionResult> {
+  const admin = await getAdminUser();
+  if (!admin) return fail(ADMIN_DENIED);
+  const r = await approveCampaignCreative(String(campaignId), admin.id);
+  refresh();
+  return r.ok ? ok("Imagem aprovada. Ativar a campanha continua sendo outro clique.") : fail(r.error);
+}
+
+export async function rejectAdCreative(campaignId: string): Promise<ActionResult> {
+  const admin = await getAdminUser();
+  if (!admin) return fail(ADMIN_DENIED);
+  const done = await rejectCampaignCreative(String(campaignId));
+  refresh();
+  return done ? ok("Imagem recusada. Peça outra composição.") : fail("Só uma imagem pendente pode ser recusada.");
+}
+
+export async function regenerateAdCreative(campaignId: string): Promise<ActionResult> {
+  const user = await getWriterUser();
+  if (!user) return fail(WRITE_DENIED);
+  const r = await regenerateCampaignCreative(String(campaignId));
+  refresh();
+  return r.ok ? ok(r.creative.status === "falhou" ? `A imagem não saiu: ${r.creative.error ?? "veja as verificações"}` : "Nova imagem pronta.") : fail(r.error);
 }
 
 export async function rejectAdCampaign(campaignId: string): Promise<ActionResult> {
@@ -173,14 +259,20 @@ export async function recordAdReport(input: unknown): Promise<ActionResult> {
   return ok("Relatório do dia gravado.");
 }
 
-const trafficConfigSchema = z.object({ daily_cap_cents: z.number().int().min(0).max(10_000_000), monthly_cap_cents: z.number().int().min(0).max(1_000_000_000), max_pending_campaigns: z.number().int().min(1).max(20) });
+const trafficConfigSchema = z.object({
+  daily_cap_cents: z.number().int().min(0).max(10_000_000),
+  monthly_cap_cents: z.number().int().min(0).max(1_000_000_000),
+  max_pending_campaigns: z.number().int().min(1).max(20),
+  creative_builder: z.enum(["modelos", "claude-code"]).optional(),
+  creative_budget_usd: z.number().min(0.1).max(5).optional(),
+});
 
 export async function saveTrafficConfig(input: unknown): Promise<ActionResult> {
   const admin = await getAdminUser();
   if (!admin) return fail(ADMIN_DENIED);
   const parsed = trafficConfigSchema.safeParse(input);
   if (!parsed.success) return fail("Configuração inválida.");
-  await saveSettings("traffic-manager", { config: { ...normalizeTrafficConfig(parsed.data) } });
+  await saveSettings("traffic-manager", { config: { ...normalizeTrafficConfig({ ...(await getTrafficConfig()), ...parsed.data }) } });
   await logAgentEvent("traffic-manager", "info", "agent.config", `${admin.name} atualizou os tetos de gasto: diário e mensal.`);
   refresh();
   return ok("Tetos de gasto salvos.");

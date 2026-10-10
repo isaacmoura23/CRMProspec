@@ -334,8 +334,8 @@ export interface SiteBuild {
   lead_id: string;
   meeting_id: string | null;
   status: SiteBuildStatus;
-  /** Quem fez: hoje só o gerador por modelos (determinístico, sem IA). */
-  builder: "modelos";
+  /** Quem escreveu a página: o gerador por modelos (determinístico) ou o Claude Code em modo restrito. */
+  builder: "modelos" | "claude-code";
   /** Endereço não adivinhável da prévia (/previa/<token>). */
   token: string;
   content_hash: string | null;
@@ -482,8 +482,14 @@ export interface LeadDossier {
 /* Agente 7 — Mídias sociais (Instagram)                               */
 /* ------------------------------------------------------------------ */
 
-/** rascunho → pendente → aprovado → publicando → publicado | falhou; recusado e expirado encerram sem publicar. */
-export type SocialPostStatus = "rascunho" | "pendente" | "aprovado" | "publicando" | "publicado" | "falhou" | "recusado" | "expirado";
+/**
+ * rascunho → pendente → aprovado → publicando → publicado | falhou; recusado e expirado encerram sem publicar.
+ * "Aprovar e agendar" leva pendente → agendado (você aprovou, para uma data) → publicando → publicado.
+ */
+export type SocialPostStatus = "rascunho" | "pendente" | "aprovado" | "agendado" | "publicando" | "publicado" | "falhou" | "recusado" | "expirado";
+
+/** Feed (imagem 4:5), Reels (vídeo 9:16) e Stories (imagem 9:16). */
+export type PostFormat = "feed" | "reel" | "story";
 
 export interface SocialPost {
   id: string;
@@ -492,8 +498,18 @@ export interface SocialPost {
   /** A pauta do dia, em uma linha. */
   topic: string;
   caption: string;
-  /** Endereço público (https) da imagem; sem ele o post não pode ser publicado. */
+  /** Feed, Reels ou Stories. */
+  format: PostFormat;
+  /** O criativo (imagem ou vídeo) gerado para este post; é a mídia publicada, salvo `image_url` informado à mão. */
+  creative_id: string | null;
+  /** Endereço público (https) da imagem informado à mão; vale no lugar do criativo. Sem mídia, o post não pode ser publicado. */
   image_url: string | null;
+  /** Quando o agente sugere publicar (calendário editorial). */
+  suggested_at: string | null;
+  /** Quando você agendou a publicação ("Aprovar e agendar"). */
+  scheduled_at: string | null;
+  /** Resumo (SHA-256) do que você aprovou: legenda, formato, mídia e data. O publicador agendado confere antes de sair. */
+  approved_digest: string | null;
   /** O que a imagem deveria mostrar (o agente sugere; quem fornece a imagem é você). */
   image_idea: string;
   status: SocialPostStatus;
@@ -539,6 +555,8 @@ export interface AdCampaign {
   body: string;
   cta: string;
   landing_url: string | null;
+  /** O criativo (imagem) da campanha; com ele, a campanha só ativa depois de você aprovar a imagem. */
+  creative_id: string | null;
   approval_id: string | null;
   external_id: string | null;
   idempotency_key: string;
@@ -567,6 +585,79 @@ export interface AdReport {
   created_at: string;
 }
 
+/* ------------------------------------------------------------------ */
+/* Criativos (imagens e vídeos da própria empresa, feitos em código)   */
+/* ------------------------------------------------------------------ */
+
+export type CreativeFormat = "feed" | "story" | "reel" | "anuncio";
+export type CreativeStatus = "pendente" | "aprovado" | "recusado" | "expirado" | "falhou";
+
+/**
+ * Um criativo é HTML/SVG renderizado localmente (Chrome headless) e, no vídeo, cenas em PNG
+ * costuradas pelo ffmpeg. Nenhuma API paga, nenhuma pessoa, foto ou marca de terceiros.
+ * Só serve de fora (`/midia/<token>/…`) depois de aprovado.
+ */
+export interface Creative {
+  id: string;
+  organization_id: string;
+  format: CreativeFormat;
+  kind: "imagem" | "video";
+  /** A que pertence: um post (calendário) ou uma campanha. */
+  owner_kind: "post" | "campaign";
+  owner_id: string;
+  status: CreativeStatus;
+  width: number;
+  height: number;
+  duration_s: number | null;
+  /** O texto que aparece na arte (vem do post ou da campanha, nunca inventado). */
+  headline: string;
+  body: string;
+  cta: string;
+  /** Quem escreveu o HTML: os modelos de arte (determinístico) ou o Claude Code em modo restrito. */
+  builder: "modelos" | "claude-code";
+  /** Variação visual (muda a composição ao pedir "outro visual"). */
+  variant: number;
+  /** Endereço não adivinhável da mídia (/midia/<token>/<arquivo>). */
+  token: string;
+  /** Arquivos gravados (nomes relativos à pasta do token). */
+  files: string[];
+  /** SHA-256 da mídia principal: o publicador confere que nada mudou depois da aprovação. */
+  content_hash: string | null;
+  checks: SiteCheck[];
+  error: string | null;
+  approved_by: string | null;
+  approved_at: string | null;
+  created_at: string;
+  updated_at: string;
+  expires_at: string;
+}
+
+/* ------------------------------------------------------------------ */
+/* Agente 2 — cobertura da varredura                                   */
+/* ------------------------------------------------------------------ */
+
+/** O que já foi varrido de um nicho em uma cidade (id = `<nicho>|<cidade sem acento>`). */
+export interface ProspectCoverage {
+  id: string;
+  organization_id: string;
+  niche: string;
+  niche_label: string;
+  city: string;
+  state: string | null;
+  country: string;
+  runs: number;
+  /** Empresas que a fonte devolveu e o agente examinou. */
+  scanned: number;
+  /** Leads novos criados. */
+  found: number;
+  filtered: number;
+  duplicates: number;
+  places_requests: number;
+  last_run_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface AgentData {
   settings: AgentSettingsRow[];
   tasks: AgentTask[];
@@ -588,6 +679,8 @@ export interface AgentData {
   social_posts: SocialPost[];
   ad_campaigns: AdCampaign[];
   ad_reports: AdReport[];
+  prospect_coverage: ProspectCoverage[];
+  creatives: Creative[];
 }
 
 export function emptyAgentData(): AgentData {
@@ -612,5 +705,7 @@ export function emptyAgentData(): AgentData {
     social_posts: [],
     ad_campaigns: [],
     ad_reports: [],
+    prospect_coverage: [],
+    creatives: [],
   };
 }

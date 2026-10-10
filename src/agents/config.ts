@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { SWEEP_SCOPES, type SweepScope } from "@/data/br-cities";
 import { normalizeBrazilianPhone } from "@/lib/outreach-policy";
 import type { AgentMode } from "@/types/agents";
 import type { SearchParams } from "@/types";
@@ -24,6 +25,11 @@ export const citySchema = z.object({
   country: z.string().trim().min(2).max(60).default("Brasil"),
 });
 export type CityConfig = z.infer<typeof citySchema>;
+
+function clampMoney(value: unknown, min: number, max: number, fallback: number): number {
+  const n = typeof value === "number" ? value : Number.NaN;
+  return Number.isFinite(n) ? Math.min(max, Math.max(min, Math.round(n * 100) / 100)) : fallback;
+}
 
 function clampInt(value: unknown, min: number, max: number, fallback: number): number {
   const n = typeof value === "number" ? value : Number(value);
@@ -201,10 +207,32 @@ export function normalizeSellerConfig(raw: unknown): SellerConfig {
 }
 
 /* ------------------------------------------------------------------ */
+/* Criativos (artes e vídeos dos Agentes 6 e 7)                        */
+/* ------------------------------------------------------------------ */
+
+export interface CreativeConfig {
+  /**
+   * Quem escreve a arte (imagens): "modelos" (modelos de arte em código, sem custo) ou "claude-code"
+   * (o Claude Code em modo restrito escreve o HTML; a mesma verificação vale e, se falhar, sai o modelo).
+   * Vídeos (Reels) sempre usam os modelos de cena + ffmpeg.
+   */
+  creative_builder: "modelos" | "claude-code";
+  /** Teto de gasto (US$) do Claude Code por arte, somando as rodadas. */
+  creative_budget_usd: number;
+}
+
+function normalizeCreativeConfig(r: Record<string, unknown>): CreativeConfig {
+  return {
+    creative_builder: r.creative_builder === "claude-code" ? "claude-code" : "modelos",
+    creative_budget_usd: clampMoney(r.creative_budget_usd, 0.1, 5, 0.5),
+  };
+}
+
+/* ------------------------------------------------------------------ */
 /* Agente 6 — Gestor de tráfego                                        */
 /* ------------------------------------------------------------------ */
 
-export interface TrafficConfig {
+export interface TrafficConfig extends CreativeConfig {
   /** Teto de gasto por dia (centavos): a soma dos orçamentos diários das campanhas ativas nunca passa disto. */
   daily_cap_cents: number;
   /** Teto de gasto por mês (centavos): o gasto do mês mais o previsto das ativas nunca passa disto. */
@@ -217,6 +245,8 @@ export const TRAFFIC_DEFAULTS: TrafficConfig = {
   daily_cap_cents: 3_000,
   monthly_cap_cents: 60_000,
   max_pending_campaigns: 3,
+  creative_builder: "modelos",
+  creative_budget_usd: 0.5,
 };
 
 export function normalizeTrafficConfig(raw: unknown): TrafficConfig {
@@ -228,6 +258,7 @@ export function normalizeTrafficConfig(raw: unknown): TrafficConfig {
     daily_cap_cents: daily,
     monthly_cap_cents: Math.max(daily, clampInt(r.monthly_cap_cents, 0, 1_000_000_000, d.monthly_cap_cents)),
     max_pending_campaigns: clampInt(r.max_pending_campaigns, 1, 20, d.max_pending_campaigns),
+    ...normalizeCreativeConfig(r),
   };
 }
 
@@ -235,16 +266,42 @@ export function normalizeTrafficConfig(raw: unknown): TrafficConfig {
 /* Agente 7 — Mídias sociais                                           */
 /* ------------------------------------------------------------------ */
 
-export interface SocialConfig {
-  /** Propostas de post esperando ao mesmo tempo. */
+export interface SocialConfig extends CreativeConfig {
+  /** Propostas de post esperando ao mesmo tempo (o teto do calendário). */
   max_pending_posts: number;
   /** Dias até uma proposta sem decisão expirar. */
   proposal_ttl_days: number;
   /** Hashtags que entram no fim da legenda (sem o "#"; até 8). */
   hashtags: string[];
+  /** Quantos dias à frente o calendário editorial é planejado. */
+  calendar_days: number;
+  /** Posts por semana de cada formato (o calendário reparte nos próximos dias). */
+  weekly_feed: number;
+  weekly_reel: number;
+  weekly_story: number;
+  /** Hora sugerida (America/Sao_Paulo) para cada formato. */
+  feed_hour: number;
+  reel_hour: number;
+  story_hour: number;
+  /** Passado este tempo do horário agendado, o publicador não publica mais: avisa em vez de sair fora de hora. */
+  late_window_hours: number;
 }
 
-export const SOCIAL_DEFAULTS: SocialConfig = { max_pending_posts: 3, proposal_ttl_days: 2, hashtags: [] };
+export const SOCIAL_DEFAULTS: SocialConfig = {
+  max_pending_posts: 6,
+  proposal_ttl_days: 3,
+  hashtags: [],
+  calendar_days: 7,
+  weekly_feed: 3,
+  weekly_reel: 1,
+  weekly_story: 2,
+  feed_hour: 12,
+  reel_hour: 18,
+  story_hour: 9,
+  late_window_hours: 3,
+  creative_builder: "modelos",
+  creative_budget_usd: 0.5,
+};
 
 export function normalizeSocialConfig(raw: unknown): SocialConfig {
   const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
@@ -253,9 +310,18 @@ export function normalizeSocialConfig(raw: unknown): SocialConfig {
     ? [...new Set(r.hashtags.map((t) => String(t).replace(/^#+/, "").replace(/[^\p{L}\p{N}_]/gu, "").slice(0, 30)).filter(Boolean))].slice(0, 8)
     : d.hashtags;
   return {
-    max_pending_posts: clampInt(r.max_pending_posts, 1, 10, d.max_pending_posts),
+    max_pending_posts: clampInt(r.max_pending_posts, 1, 20, d.max_pending_posts),
     proposal_ttl_days: clampInt(r.proposal_ttl_days, 1, 14, d.proposal_ttl_days),
     hashtags: tags,
+    calendar_days: clampInt(r.calendar_days, 1, 14, d.calendar_days),
+    weekly_feed: clampInt(r.weekly_feed, 0, 7, d.weekly_feed),
+    weekly_reel: clampInt(r.weekly_reel, 0, 7, d.weekly_reel),
+    weekly_story: clampInt(r.weekly_story, 0, 14, d.weekly_story),
+    feed_hour: clampInt(r.feed_hour, 0, 23, d.feed_hour),
+    reel_hour: clampInt(r.reel_hour, 0, 23, d.reel_hour),
+    story_hour: clampInt(r.story_hour, 0, 23, d.story_hour),
+    late_window_hours: clampInt(r.late_window_hours, 1, 24, d.late_window_hours),
+    ...normalizeCreativeConfig(r),
   };
 }
 
@@ -273,12 +339,31 @@ export interface SiteBuilderConfig {
    * Sem ele a prévia não é entregue — só checagens de arquivo não bastam.
    */
   require_browser_check: boolean;
+  /**
+   * Quem escreve a página: "modelos" (gerador determinístico, sem IA) ou "claude-code" (o Claude Code
+   * em modo restrito, com as skills de design fixadas). A verificação é a mesma nos dois e, se o
+   * Claude Code falhar ou estourar o prazo/teto, a prévia sai pelo gerador por modelos.
+   */
+  builder: "modelos" | "claude-code";
+  /** Teto de gasto (US$) por prévia no Claude Code, somando todas as rodadas. */
+  claude_budget_usd: number;
+  /** Minutos que cada rodada do Claude Code pode levar. */
+  claude_timeout_min: number;
+  /** Rodadas de correção quando a verificação reprova a primeira escrita. */
+  claude_repair_rounds: number;
+  /** Modelo do Claude Code (vazio = o padrão da instalação). */
+  claude_model: string;
 }
 
 export const SITE_BUILDER_DEFAULTS: SiteBuilderConfig = {
   deadline_margin_hours: 2,
   keep_days_after_meeting: 7,
   require_browser_check: true,
+  builder: "modelos",
+  claude_budget_usd: 1.5,
+  claude_timeout_min: 8,
+  claude_repair_rounds: 2,
+  claude_model: "",
 };
 
 export function normalizeSiteBuilderConfig(raw: unknown): SiteBuilderConfig {
@@ -288,6 +373,11 @@ export function normalizeSiteBuilderConfig(raw: unknown): SiteBuilderConfig {
     deadline_margin_hours: clampInt(r.deadline_margin_hours, 1, 72, d.deadline_margin_hours),
     keep_days_after_meeting: clampInt(r.keep_days_after_meeting, 1, 60, d.keep_days_after_meeting),
     require_browser_check: r.require_browser_check === undefined ? d.require_browser_check : r.require_browser_check !== false,
+    builder: r.builder === "claude-code" ? "claude-code" : "modelos",
+    claude_budget_usd: clampMoney(r.claude_budget_usd, 0.1, 10, d.claude_budget_usd),
+    claude_timeout_min: clampInt(r.claude_timeout_min, 1, 20, d.claude_timeout_min),
+    claude_repair_rounds: clampInt(r.claude_repair_rounds, 0, 4, d.claude_repair_rounds),
+    claude_model: typeof r.claude_model === "string" && /^[A-Za-z0-9._:-]{0,64}$/.test(r.claude_model.trim()) ? r.claude_model.trim() : d.claude_model,
   };
 }
 
@@ -351,6 +441,14 @@ export interface ProspectorConfig {
   /** Dias até voltar a prospectar o mesmo nicho × cidade. */
   cooldown_days: number;
   filters: SearchParams["filters"];
+  /**
+   * Varredura contínua: além dos nichos ranqueados pelo Agente 1, percorre cidades do Brasil (as
+   * ainda não cobertas primeiro) procurando SÓ empresas sem site. Respeita os tetos diários.
+   */
+  sweep: boolean;
+  sweep_scope: SweepScope;
+  /** Quantos nichos (os de maior nota) entram na varredura. */
+  sweep_niches: number;
 }
 
 export const PROSPECTOR_DEFAULTS: ProspectorConfig = {
@@ -361,6 +459,9 @@ export const PROSPECTOR_DEFAULTS: ProspectorConfig = {
   cooldown_days: 7,
   // O alvo do negócio: quem não tem site ou tem um site fraco.
   filters: { weakWebsite: true, activeBusiness: true },
+  sweep: false,
+  sweep_scope: "principais",
+  sweep_niches: 3,
 };
 
 const FILTER_KEYS = [
@@ -395,5 +496,8 @@ export function normalizeProspectorConfig(raw: unknown): ProspectorConfig {
     min_niche_score: clampInt(r.min_niche_score, 0, 100, d.min_niche_score),
     cooldown_days: clampInt(r.cooldown_days, 0, 90, d.cooldown_days),
     filters: hasFilters ? normalizeFilters(r.filters) : { ...d.filters },
+    sweep: r.sweep === true,
+    sweep_scope: SWEEP_SCOPES.includes(r.sweep_scope as SweepScope) ? (r.sweep_scope as SweepScope) : d.sweep_scope,
+    sweep_niches: clampInt(r.sweep_niches, 1, 10, d.sweep_niches),
   };
 }

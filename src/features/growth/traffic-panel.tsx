@@ -1,13 +1,14 @@
 "use client";
 
 import * as React from "react";
-import { Loader2, Pause, Play, Sparkles, X } from "lucide-react";
+import { Loader2, Palette, Pause, Play, Sparkles, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { activateAdCampaign, approveAdCampaign, endAdCampaign, pauseAdCampaign, proposeCampaignNow, recordAdReport, rejectAdCampaign, saveTrafficConfig, setAdCampaignBudget } from "@/actions/growth";
+import { activateAdCampaign, approveAdCampaign, approveAdCreative, endAdCampaign, pauseAdCampaign, proposeCampaignNow, recordAdReport, regenerateAdCreative, rejectAdCampaign, rejectAdCreative, saveTrafficConfig, setAdCampaignBudget } from "@/actions/growth";
+import { CreativePreview } from "@/features/growth/creative-preview";
 import { useAgentAction } from "@/features/agents/controls";
 import { formatBrl } from "@/lib/money";
 import { formatNumber, timeAgo } from "@/lib/format";
@@ -79,6 +80,8 @@ function CampaignItem({ row, canDecide }: { row: CampaignRow; canDecide: boolean
   const [externalId, setExternalId] = React.useState("");
   const [open, setOpen] = React.useState(false);
   const changed = Math.round(Number(budget.replace(",", ".")) * 100) !== c.daily_budget_cents;
+  // Com imagem, a campanha só ativa depois de você aprovar a imagem (o servidor confere de novo).
+  const imageBlocks = Boolean(c.creative_id) && row.creative?.status !== "aprovado";
 
   return (
     <li className="space-y-2 px-5 py-4">
@@ -98,6 +101,30 @@ function CampaignItem({ row, canDecide }: { row: CampaignRow; canDecide: boolean
           Botão: “{c.cta}” · Público: {c.audience || "—"}
         </p>
       </div>
+      {row.creative && (
+        <div className="space-y-1.5">
+          <CreativePreview creative={row.creative} />
+          {canDecide && row.creative.status === "pendente" && c.status !== "recusada" && c.status !== "expirada" && c.status !== "encerrada" && (
+            <div className="flex flex-wrap items-center gap-2">
+              <Button size="sm" variant="secondary" disabled={pending} onClick={() => run(() => rejectAdCreative(c.id))}>
+                <X /> Recusar a imagem
+              </Button>
+              <Button size="sm" variant="ghost" disabled={pending} onClick={() => run(() => regenerateAdCreative(c.id))}>
+                <Palette /> Outro visual
+              </Button>
+              <Button size="sm" disabled={pending} onClick={() => run(() => approveAdCreative(c.id))}>
+                Aprovar a imagem
+              </Button>
+              <span className="text-xs text-muted-foreground">Aprovar a imagem não gasta nada: ativar a campanha é outro clique.</span>
+            </div>
+          )}
+          {canDecide && (row.creative.status === "recusado" || row.creative.status === "falhou" || row.creative.status === "expirado") && c.status !== "recusada" && c.status !== "expirada" && c.status !== "encerrada" && c.status !== "ativa" && (
+            <Button size="sm" variant="secondary" disabled={pending} onClick={() => run(() => regenerateAdCreative(c.id))}>
+              <Palette /> Gerar outra imagem
+            </Button>
+          )}
+        </div>
+      )}
       {(c.status === "ativa" || c.status === "pausada" || c.status === "encerrada") && (
         <p className="text-xs text-muted-foreground">
           Últimos 7 dias: {formatBrl(row.last7.spend_cents)} gastos · {formatNumber(row.last7.impressions)} impressões · {formatNumber(row.last7.clicks)} cliques · {formatNumber(row.last7.conversions)} conversões
@@ -121,7 +148,7 @@ function CampaignItem({ row, canDecide }: { row: CampaignRow; canDecide: boolean
           {(c.status === "aprovado" || c.status === "pausada") && (
             <>
               <Input className="h-8 w-44" value={externalId} onChange={(e) => setExternalId(e.target.value)} placeholder="ID na plataforma (opcional)" aria-label="ID da campanha na plataforma" />
-              <Button size="sm" disabled={pending} onClick={() => run(() => activateAdCampaign(c.id, externalId))}>
+              <Button size="sm" disabled={pending || imageBlocks} title={imageBlocks ? "Aprove a imagem do anúncio antes de ativar" : undefined} onClick={() => run(() => activateAdCampaign(c.id, externalId))}>
                 {pending ? <Loader2 className="animate-spin" /> : <Play />} Ativar (começa a gastar)
               </Button>
             </>
@@ -221,11 +248,13 @@ export function CampaignList({ rows, canDecide, canRun }: { rows: CampaignRow[];
   );
 }
 
-export function TrafficConfigForm({ config, canAdmin }: { config: TrafficConfig; canAdmin: boolean }) {
+export function TrafficConfigForm({ config, claudeFound, canAdmin }: { config: TrafficConfig; claudeFound: boolean; canAdmin: boolean }) {
   const { run, pending } = useAgentAction();
   const [daily, setDaily] = React.useState((config.daily_cap_cents / 100).toFixed(2));
   const [monthly, setMonthly] = React.useState((config.monthly_cap_cents / 100).toFixed(2));
   const [max, setMax] = React.useState(String(config.max_pending_campaigns));
+  const [builder, setBuilder] = React.useState<TrafficConfig["creative_builder"]>(config.creative_builder);
+  const [budget, setBudget] = React.useState(String(config.creative_budget_usd));
   const cents = (v: string) => Math.round(Number(v.replace(",", ".")) * 100);
   return (
     <Card>
@@ -248,8 +277,32 @@ export function TrafficConfigForm({ config, canAdmin }: { config: TrafficConfig;
             <Input type="number" min={1} max={20} value={max} onChange={(e) => setMax(e.target.value)} disabled={!canAdmin} />
           </div>
         </div>
+        <fieldset className="max-w-xl space-y-3 rounded-lg border border-border p-4" disabled={!canAdmin}>
+          <legend className="px-1 text-[13px] font-medium">Quem escreve a imagem do anúncio</legend>
+          {(
+            [
+              ["modelos", "Modelos de arte", "Em código, sem custo (1080×1080)."],
+              ["claude-code", "Claude Code", "Escreve o HTML da arte em modo restrito, com a mesma verificação; se falhar ou estourar o teto, sai o modelo."],
+            ] as const
+          ).map(([value, label, hint]) => (
+            <label key={value} className="flex cursor-pointer items-start gap-2.5">
+              <input type="radio" name="ad-creative-builder" className="mt-0.5 size-4 accent-[var(--color-primary)]" checked={builder === value} onChange={() => setBuilder(value)} />
+              <span>
+                <span className="block text-[13px] font-medium">{label}</span>
+                <span className="block text-xs text-muted-foreground">{hint}</span>
+              </span>
+            </label>
+          ))}
+          <p className="text-xs text-muted-foreground">{claudeFound ? "Claude Code encontrado nesta máquina." : "Claude Code não encontrado: com ele escolhido, saem os modelos de arte."}</p>
+          {builder === "claude-code" && (
+            <div className="max-w-40 space-y-1.5">
+              <Label>Teto por imagem (US$)</Label>
+              <Input type="number" min={0.1} max={5} step={0.1} value={budget} onChange={(e) => setBudget(e.target.value)} />
+            </div>
+          )}
+        </fieldset>
         {canAdmin && (
-          <Button disabled={pending} onClick={() => run(() => saveTrafficConfig({ daily_cap_cents: cents(daily), monthly_cap_cents: cents(monthly), max_pending_campaigns: Number(max) }))}>
+          <Button disabled={pending} onClick={() => run(() => saveTrafficConfig({ daily_cap_cents: cents(daily), monthly_cap_cents: cents(monthly), max_pending_campaigns: Number(max), creative_builder: builder, creative_budget_usd: Number(budget) }))}>
             {pending && <Loader2 className="animate-spin" />} Salvar tetos
           </Button>
         )}

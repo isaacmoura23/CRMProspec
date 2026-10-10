@@ -5,6 +5,9 @@ import { logAgentEvent } from "@/services/agents/log";
 import { planAgents } from "@/services/agents/planner";
 import { runAgentQueue } from "@/services/agents/queue";
 import { processDueOwnerNotices } from "@/services/conversation/notices";
+import { expireStaleCampaigns } from "@/services/ads/campaigns";
+import { expireStaleCreatives } from "@/services/creatives/engine";
+import { runSocialMaintenance } from "@/services/social/posts";
 import { processDueOutreach, reconcileOutreach } from "@/services/outreach/send";
 import { agentRepo, orgId } from "@/services/agents/repository";
 import { runnableAgents } from "@/services/agents/settings";
@@ -131,6 +134,11 @@ export async function runnerTick(s: Pick<RunnerState, "ticking" | "lastPlanAt" |
       await processDueOwnerNotices();
     }
 
+    // Mídias sociais: publica SÓ o que você agendou (já chegou a hora, tudo reconferido), expira o que ficou sem decisão
+    // e reconcilia o que ficou preso. Só com o agente liberado: interruptor geral e modo "pausado" seguram tudo.
+    if (agents.includes("social-media")) await runSocialMaintenance();
+    if (agents.includes("traffic-manager")) await expireStaleCampaigns();
+
     if (now - s.lastHousekeepingAt >= HOUSEKEEPING_EVERY_MS) {
       s.lastHousekeepingAt = now;
       await housekeeping(now);
@@ -156,4 +164,5 @@ export async function housekeeping(now = Date.now()): Promise<void> {
     (a) => a.status !== "pendente" && a.created_at < daysAgo(now, APPROVAL_RETENTION_DAYS)
   );
   for (const a of old) await repo.remove("approvals", { id: a.id });
+  await expireStaleCreatives(new Date(now));
 }

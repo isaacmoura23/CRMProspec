@@ -24,6 +24,7 @@ import {
   getAgentMode,
   getNicheAnalystConfig,
   getSellerConfig,
+  getSiteBuilderConfig,
   isGloballyEnabled,
   saveSettings,
   setGloballyEnabled,
@@ -107,6 +108,9 @@ const prospectorConfigSchema = z.object({
   min_niche_score: z.number().int().min(0).max(100),
   cooldown_days: z.number().int().min(0).max(90),
   filters: z.record(z.string(), z.boolean()),
+  sweep: z.boolean().optional(),
+  sweep_scope: z.enum(["capitais", "principais"]).optional(),
+  sweep_niches: z.number().int().min(1).max(10).optional(),
 });
 
 export async function saveProspectorConfig(input: unknown): Promise<ActionResult> {
@@ -219,6 +223,11 @@ const siteBuilderConfigSchema = z.object({
   deadline_margin_hours: z.number().int().min(1).max(72),
   keep_days_after_meeting: z.number().int().min(1).max(60),
   require_browser_check: z.boolean(),
+  builder: z.enum(["modelos", "claude-code"]).optional(),
+  claude_budget_usd: z.number().min(0.1).max(10).optional(),
+  claude_timeout_min: z.number().int().min(1).max(20).optional(),
+  claude_repair_rounds: z.number().int().min(0).max(4).optional(),
+  claude_model: z.string().max(64).optional(),
 });
 
 export async function saveSiteBuilderConfig(input: unknown): Promise<ActionResult> {
@@ -226,7 +235,8 @@ export async function saveSiteBuilderConfig(input: unknown): Promise<ActionResul
   if (!admin) return fail(ADMIN_DENIED);
   const parsed = siteBuilderConfigSchema.safeParse(input);
   if (!parsed.success) return fail("Configuração inválida. Revise os limites.");
-  await saveSettings("site-builder", { config: { ...normalizeSiteBuilderConfig(parsed.data) } });
+  // Mescla com o que já está salvo: campos não enviados não voltam ao padrão.
+  await saveSettings("site-builder", { config: { ...normalizeSiteBuilderConfig({ ...(await getSiteBuilderConfig()), ...parsed.data }) } });
   await logAgentEvent("site-builder", "info", "agent.config", `${admin.name} atualizou a configuração do Programador de Sites.`);
   refresh();
   return ok("Configuração salva.");

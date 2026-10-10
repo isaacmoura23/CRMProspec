@@ -16,7 +16,7 @@ const normalize = (s: string): string =>
     .replace(/[̀-ͯ]/g, "")
     .toLowerCase();
 
-const words = (s: string): string[] => normalize(s).split(/[^a-z0-9]+/).filter(Boolean);
+export const words = (s: string): string[] => normalize(s).split(/[^a-z0-9]+/).filter(Boolean);
 
 function decode(s: string): string {
   return s

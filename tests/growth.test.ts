@@ -19,6 +19,7 @@ import { InstagramError, createInstagramReader, instagramConfig } from "@/servic
 import { createInstagramPublisher, type InstagramPublisher } from "@/services/social/instagram-publisher";
 import { approveAndPublish, editPost, expireStalePosts, markNotPublished, proposePost, reconcileStuckPublishing, reconcileUncertainPost, reopenFailedPost } from "@/services/social/posts";
 import { emptyAgentData, type AdCampaign } from "@/types/agents";
+import { installCreativeFakes } from "./creative-fakes";
 
 const NOW = new Date("2026-10-12T15:00:00Z");
 const TODAY = "2026-10-12";
@@ -47,12 +48,16 @@ function setProfile(over: Partial<typeof original> = {}) {
   });
 }
 
+let undoFakes: () => void;
 beforeEach(() => {
   registerAgentHandlers();
   reset();
   setProfile();
+  // Navegador e ffmpeg simulados: os agentes geram a arte junto da proposta, e nenhum teste abre o Chrome de verdade.
+  undoFakes = installCreativeFakes();
 });
 afterEach(() => {
+  undoFakes();
   Object.assign(getDb().company_profile, original);
   delete process.env.INSTAGRAM_ACCESS_TOKEN;
   delete process.env.INSTAGRAM_BUSINESS_ID;
@@ -89,7 +94,7 @@ describe("a regra central: o que os agentes NÃO podem tocar", () => {
   });
 
   it("o código dos agentes não importa nem cita publicar, ativar, pausar nem mexer em orçamento", () => {
-    const forbidden = /instagram-publisher|publish_media|publishImage|approveAndPublish|activateCampaign|pauseCampaign|setCampaignBudget|endCampaign|approveCampaignDraft|applyBudgetChange|claimStatus/;
+    const forbidden = /instagram-publisher|publish_media|schedule_media|publishMedia|publishImage|approveAndPublish|approveAndSchedule|publishDueScheduled|runSocialMaintenance|cancelSchedule|approveCreative|approveCampaignCreative|activateCampaign|pauseCampaign|setCampaignBudget|endCampaign|approveCampaignDraft|applyBudgetChange|claimStatus/;
     const offenders: string[] = [];
     for (const file of files(AGENTS_DIR)) {
       if (file.endsWith("tools.ts")) continue; // a própria lista cita os nomes para proibi-los
@@ -103,7 +108,7 @@ describe("a regra central: o que os agentes NÃO podem tocar", () => {
     const importers = files(root).filter((f) => /from "@\/services\/social\/instagram-publisher"/.test(fs.readFileSync(f, "utf-8"))).map((f) => path.relative(root, f).replace(/\\/g, "/"));
     assert.deepEqual(importers, ["services/social/posts.ts"]);
     const readerSource = fs.readFileSync(path.join(root, "services", "social", "instagram.ts"), "utf-8");
-    assert.doesNotMatch(readerSource, /media_publish|publishImage/, "o arquivo de leitura não sabe publicar");
+    assert.doesNotMatch(readerSource, /media_publish|publishMedia|publishImage/, "o arquivo de leitura não sabe publicar");
   });
 });
 
@@ -158,11 +163,18 @@ describe("rodando os agentes: eles só propõem (prova em tempo de execução)",
 });
 
 describe("Instagram: regras da legenda e do estado", () => {
-  it("a máquina de estados só deixa chegar a 'publicando' a partir de 'aprovado' (que só o clique produz)", () => {
+  it("a máquina de estados só deixa chegar a 'publicando' a partir de 'aprovado' ou 'agendado' (que só um clique produz)", () => {
     for (const [from, tos] of Object.entries(POST_TRANSITIONS)) {
-      if (tos.includes("publicando")) assert.equal(from, "aprovado");
+      if (tos.includes("publicando")) assert.ok(from === "aprovado" || from === "agendado", from);
+    }
+    // agendado só se alcança de pendente (o clique de "Aprovar e agendar"); nada o alcança por conta própria
+    for (const [from, tos] of Object.entries(POST_TRANSITIONS)) {
+      if (tos.includes("agendado")) assert.equal(from, "pendente");
     }
     assert.ok(!canMovePost("pendente", "publicando"));
+    assert.ok(!canMovePost("rascunho", "agendado"));
+    assert.ok(!canMovePost("falhou", "agendado"));
+    assert.ok(canMovePost("agendado", "pendente"), "cancelar o agendamento");
     assert.ok(!canMovePost("publicado", "pendente"));
     assert.ok(!canMovePost("recusado", "aprovado"));
     assert.ok(canMovePost("falhou", "pendente"));
@@ -201,13 +213,14 @@ describe("Instagram: regras da legenda e do estado", () => {
 });
 
 describe("Instagram: propor, editar e publicar só com o clique", () => {
-  const publisher = (impl?: InstagramPublisher["publishImage"]) => {
-    const calls: Array<{ imageUrl: string; caption: string; idempotencyKey: string }> = [];
+  const publisher = (impl?: InstagramPublisher["publishMedia"]) => {
+    const calls: Array<Parameters<InstagramPublisher["publishMedia"]>[0]> = [];
     const p: InstagramPublisher = {
-      publishImage: async (i) => {
+      publishMedia: async (i) => {
         calls.push(i);
         return impl ? impl(i) : { id: "17900000000001", permalink: "https://www.instagram.com/p/ABC/" };
       },
+      quota: async () => null,
     };
     return { p, calls };
   };
@@ -352,7 +365,7 @@ describe("Instagram: cliente HTTP", () => {
       if (String(url).endsWith("/media")) return new Response(JSON.stringify({ id: "creation-1" }), { status: 200 });
       return new Response(JSON.stringify({ permalink: "https://www.instagram.com/p/AA/" }), { status: 200 });
     }) as unknown as typeof fetch;
-    const res = await createInstagramPublisher(cfg, f)!.publishImage({ imageUrl: IMG, caption: CAPTION, idempotencyKey: "k" });
+    const res = await createInstagramPublisher(cfg, f)!.publishMedia({ format: "feed", mediaUrl: IMG, caption: CAPTION, idempotencyKey: "k" });
     assert.deepEqual(res, { id: "9001", permalink: "https://www.instagram.com/p/AA/" });
     assert.deepEqual(calls.slice(0, 2), ["POST /v21.0/17841400000000/media", "POST /v21.0/17841400000000/media_publish"]);
 
@@ -360,7 +373,7 @@ describe("Instagram: cliente HTTP", () => {
       (async () => new Response(JSON.stringify({ error: { message: "x", code } }), { status })) as unknown as typeof fetch;
     const kind = async (f2: typeof fetch) => {
       try {
-        await createInstagramPublisher(cfg, f2)!.publishImage({ imageUrl: IMG, caption: CAPTION, idempotencyKey: "k" });
+        await createInstagramPublisher(cfg, f2)!.publishMedia({ format: "feed", mediaUrl: IMG, caption: CAPTION, idempotencyKey: "k" });
         return "ok";
       } catch (e) {
         return (e as InstagramError).kind;
@@ -392,12 +405,13 @@ describe("Agente de mídias sociais: o que propõe", () => {
     assert.deepEqual(await socialMedia.plan(), []);
   });
 
-  it("planeja uma proposta por dia e respeita o limite de pendentes", async () => {
+  it("planeja as vagas do calendário e respeita o limite de pendentes", async () => {
+    await saveSettings("social-media", { config: { max_pending_posts: 2 } });
     const planned = await socialMedia.plan();
-    assert.equal(planned.length, 1);
-    assert.equal(planned[0]!.kind, "social.propose");
-    await proposePost({ topic: "Limpeza de pele", caption: CAPTION, imageIdea: "f" });
-    assert.deepEqual(await socialMedia.plan(), [], "já houve proposta hoje");
+    assert.equal(planned.length, 2, "no máximo o que cabe entre os pendentes");
+    assert.ok(planned.every((p) => p.kind === "social.propose" && ["feed", "reel", "story"].includes((p.payload as { format: string }).format)));
+    for (let i = 0; i < 2; i++) await proposePost({ topic: `Pauta ${i}`, caption: CAPTION + i, imageIdea: "f" });
+    assert.deepEqual(await socialMedia.plan(), [], "dois pendentes já ocupam o teto");
   });
 
   it("não repete a pauta de um post recente e ainda propõe quando todas já foram usadas", async () => {

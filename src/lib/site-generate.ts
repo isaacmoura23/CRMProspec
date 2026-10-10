@@ -102,13 +102,18 @@ function luminance(hex: string): number {
   return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
 }
 
-/** Cor principal: a do site atual (se for legível) ou um tom derivado do nome. Sempre com contraste suficiente. */
-export function pickPalette(profile: DossierProfile): { primary: string; onPrimary: string; soft: string } {
-  let primary = normalizeHex(profile.theme_color) ?? hslToHex(hashHue(profile.name), 0.55, 0.36);
+/** Cor principal: a informada (se for legível) ou um tom derivado do nome. Sempre com contraste suficiente. */
+export function paletteFor(name: string, themeColor: string | null): { primary: string; onPrimary: string; soft: string; hue: number } {
+  let primary = normalizeHex(themeColor) ?? hslToHex(hashHue(name), 0.55, 0.36);
   // Cor muito clara não segura texto branco nem destaque: escurece até ter contraste.
-  if (luminance(primary) > 0.45) primary = hslToHex(hashHue(profile.name), 0.55, 0.34);
+  if (luminance(primary) > 0.45) primary = hslToHex(hashHue(name), 0.55, 0.34);
   const onPrimary = luminance(primary) > 0.4 ? "#111111" : "#ffffff";
-  const soft = hslToHex(hashHue(profile.name), 0.4, 0.95);
+  const soft = hslToHex(hashHue(name), 0.4, 0.95);
+  return { primary, onPrimary, soft, hue: hashHue(name) };
+}
+
+export function pickPalette(profile: DossierProfile): { primary: string; onPrimary: string; soft: string } {
+  const { primary, onPrimary, soft } = paletteFor(profile.name, profile.theme_color);
   return { primary, onPrimary, soft };
 }
 
