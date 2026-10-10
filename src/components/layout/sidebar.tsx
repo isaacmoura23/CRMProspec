@@ -9,11 +9,14 @@ import {
   Building2,
   Calendar,
   CheckSquare,
+  ClipboardCheck,
   Compass,
+  Crosshair,
   FileText,
   LayoutDashboard,
   MessageSquare,
   Plug,
+  Radar,
   Repeat,
   Settings,
   Sparkles,
@@ -27,6 +30,8 @@ interface NavItem {
   href: string;
   label: string;
   icon: React.ComponentType<{ className?: string }>;
+  /** Só fica ativo na rota exata (a visão geral não deve acender nas subpáginas). */
+  exact?: boolean;
 }
 
 const SECTIONS: Array<{ title: string | null; items: NavItem[] }> = [
@@ -48,6 +53,15 @@ const SECTIONS: Array<{ title: string | null; items: NavItem[] }> = [
       { href: "/analises", label: "Análises IA", icon: Sparkles },
       { href: "/campanhas", label: "Campanhas", icon: Calendar },
       { href: "/automacoes", label: "Automações", icon: Bot },
+    ],
+  },
+  {
+    title: "Agentes",
+    items: [
+      { href: "/agentes", label: "Visão geral", icon: Radar, exact: true },
+      { href: "/agentes/niche-analyst", label: "Analista de Nicho", icon: Radar },
+      { href: "/agentes/prospector", label: "Prospectador", icon: Crosshair },
+      { href: "/agentes/aprovacao", label: "Aprovação", icon: ClipboardCheck },
     ],
   },
   {
@@ -96,8 +110,9 @@ export function Sidebar() {
             )}
             <ul className="space-y-0.5">
               {section.items.map((item) => {
-                const active =
-                  pathname === item.href || pathname.startsWith(`${item.href}/`);
+                const active = item.exact
+                  ? pathname === item.href
+                  : pathname === item.href || pathname.startsWith(`${item.href}/`);
                 return (
                   <li key={item.href}>
                     <Link

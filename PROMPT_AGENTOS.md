@@ -8,7 +8,7 @@ Oferta comercial usada pelos agentes: **"Sua loja virtual pronta em até 7 dias"
 
 - Stack: Next.js 16.3.1, React 19.2.8, TypeScript, Tailwind 4, Radix, Zod 4. Leia `AGENTS.md` e os guias de `node_modules/next/dist/docs/` antes de programar. Este worktree não tem `node_modules`: rode `npm install` primeiro.
 - **Já existe (reaproveite):**
-  - Prospecção: `src/jobs/prospecting.ts`, `GooglePlacesProvider` (conectado), filtros `noWebsite`/`badWebsite`/`hasWhatsapp` em `src/services/lead-filter.ts`, dedupe, `seen_source_ids`, enriquecimento em `src/services/enrichment.ts`, score explicável em `src/services/scoring.ts`.
+  - Prospecção: `src/jobs/prospecting.ts`, `GooglePlacesProvider` (conectado), filtros `noWebsite`/`badWebsite`/`weakWebsite`/`hasWhatsapp` em `src/services/lead-filter.ts` (**`noWebsite` e `badWebsite` se excluem; o OU "sem site ou site fraco" é o `weakWebsite`**), dedupe, `seen_source_ids`, enriquecimento em `src/services/enrichment.ts`, score explicável em `src/services/scoring.ts`.
   - IA: `src/ai/` com fachada, schemas Zod e fallback determinístico (`aiAnalyzeLead`, `aiGenerateOutreach`, `aiClassifyResponse`, `aiHandleObjection`).
   - Funil: 13 status de lead (`novo` … `interessado`, `demo`, `reuniao`, `proposta`, `fechado`, `perdido`) e pipeline kanban.
   - Eventos: `services/events.ts` + `event-catalog.ts` (barramento, automações e webhooks assinados com HMAC).
@@ -43,6 +43,7 @@ Três camadas, porque agentes que navegam, enviam WhatsApp e constroem sites nã
 1. **Dashboard** (Next.js, Vercel): lê estado, mostra, configura, aprova. Não executa agentes.
 2. **Estado** (Supabase): fonte única de verdade. Tabelas novas em `database/migrations/0005_agentes.sql`, com `organization_id` e RLS no padrão da `0004_auth.sql`: `agent_settings`, `agent_tasks` (fila com lease), `agent_runs`, `agent_events` (log estruturado), `agent_heartbeats`, `niche_targets`, `lead_dossiers`, `meetings`, `site_builds`, `approvals`, `channel_blocklist`, `spend_ledger`, e as do canal: `outreach_cycles`, `outreach_messages` (com `status_events`) e `whatsapp_link` (estado da conexão espelhado pelo gateway). Verifique qual esquema está de fato instalado antes de migrar (UUID × text, como na 0001 × 0002).
 3. **Worker** (Node/tsx, PM2 ou Docker, no VPS): consome `agent_tasks`, executa os agentes e grava heartbeat. Reutilize a técnica de `mcp/runtime.cjs` (stubs de `server-only`, `next/cache`, `next/server`) para rodar o código de `src/services` fora do Next. O cron da Vercel fica só como tick de reserva.
+   **Atualização (F0, implementada):** enquanto o núcleo do CRM (snapshot e cache de leads) for por processo, o runner roda **dentro do mesmo processo do servidor** (`src/instrumentation.ts`), com a fila durável em `agent_tasks`. Um worker em processo separado só entra depois de migrar leads, atividades, perfil e configurações para tabelas compartilhadas; o código dos agentes já é independente de onde roda.
 4. **Gateway de WhatsApp** (serviço próprio no VPS, portado do `agenteitalo`; ver Agente 4). Fronteira rígida: o gateway **não** acessa o Supabase. Ele tem Postgres próprio só para a sessão do Baileys (credenciais e chaves de sinal) e uma caixa de saída de eventos. O CRM fala com ele por HTTP com token, e ele entrega eventos ao CRM por webhook assinado (HMAC, idempotente, com reenvio). Motivo: o plano gratuito do Supabase pausa por inatividade, e perder o banco da sessão derruba o número e exige novo QR.
 
 Comunicação entre agentes é **por eventos persistidos**, não por chamada direta: cada agente consome um evento, grava o resultado e emite o próximo. Estenda `event-catalog.ts` (`niche.targets_ready`, `lead.dossier_ready`, `lead.interested`, `meeting.scheduled`, `site.build_requested`, `site.ready`, `approval.requested`) para que automações e webhooks existentes também enxerguem o funil.
@@ -68,7 +69,7 @@ Comunicação entre agentes é **por eventos persistidos**, não por chamada dir
 
 ### Agente 2 — Prospectador
 - **Função:** transformar nichos em leads novos, sem site ou com site fraco.
-- **Como:** consome `niche_targets` e dispara o job de prospecção existente com `noWebsite`/`badWebsite`, em fila durável (retomável, lease), com teto diário de requisições do Places em `agent_settings`. Mantém dedupe e `seen_source_ids`. Busca web só complementa site/rede social de um lead que a fonte não trouxe.
+- **Como:** consome `niche_targets` e dispara o job de prospecção existente com o filtro `weakWebsite` (sem site **ou** site fraco; `noWebsite` e `badWebsite` juntos se excluem e devolveriam zero), em fila durável (retomável, lease), com teto diário de requisições do Places em `agent_settings`. Mantém dedupe e `seen_source_ids`. Busca web só complementa site/rede social de um lead que a fonte não trouxe.
 - **Saída:** leads com `agent_origin = prospector` e evento `lead.created`. Só segue adiante o lead com score ≥ mínimo configurado.
 - **Nota:** o MCP de busca web do pedido original é desnecessário aqui; o Places é estruturado, mais barato e já integrado.
 

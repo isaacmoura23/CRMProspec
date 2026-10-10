@@ -92,6 +92,28 @@ retomar sem precisar reconstruir o contexto.
   `CRON_SECRET`, `CAREER_TOKEN_SECRET` e (opcional) OAuth do Gmail, Adzuna e
   OCR. A autenticação real continua pendente — sem ela, o módulo é demo.
 
+### AgentOS: fundação e Agentes 1 e 2 (10/10/2026)
+- Dashboard em `/agentes` (visão geral com funil real, uma página por agente e
+  `/agentes/aprovacao`), fila durável, runner no mesmo processo do servidor,
+  interruptor geral, modos pausado/aprovação/automático e tetos diários.
+- Analista de Nicho (sondagem medida na fonte + score explicável) e Prospectador
+  (reaproveita o job de prospecção). Filtro novo `weakWebsite` (sem site OU site
+  fraco), porque `noWebsite` e `badWebsite` se excluem.
+- Verificado no navegador, em produção local (`npm run build && npm start`):
+  análise → ranking, prospecção manual (20 leads), proposta automática em
+  aprovação → aprovar → 20 leads, teto diário atingido, interruptor geral
+  recusando execuções, estado preservado após reiniciar, perfil vendedor sem
+  controles de configuração, sem erro de console, celular sem rolagem lateral.
+- Testes: `npm test` (inclui fila, políticas, aprovações, planejador, score e
+  caracterização do job de prospecção). `mcp`: ferramenta `agentes_estado`.
+- **Não verificado:** a migração `0005_agentes.sql` e o repositório do Supabase
+  (`SupabaseAgentRepo`) — exigem um projeto Supabase de verdade (rode a 0005 e
+  `node scripts/verificar-supabase.mjs`). Nem a análise com `GOOGLE_PLACES_API_KEY`
+  real: no worktree de desenvolvimento só o diretório de demonstração foi exercitado.
+- **Fica para as próximas fases:** Agentes 3–7, gateway de WhatsApp (portar o do
+  `agenteitalo`), cliente Anthropic (`scripts/set-anthropic-key.mjs` já existe),
+  worker em processo separado (exige migrar o núcleo do CRM para o banco).
+
 ## Pela metade — Supabase
 
 Objetivo: em produção o banco vive na memória da instância, então leads

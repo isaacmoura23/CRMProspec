@@ -233,6 +233,44 @@ ausência de credenciais. `npm run typecheck` e `npm run lint` completam.
 identifica o titular por cookie sem senha) e rodar a migração 0003 — as
 políticas de RLS e de Storage só valem com Supabase Auth.
 
+## Agentes (AgentOS)
+
+Agentes que operam o funil sozinhos, observados pelo dashboard em **/agentes**.
+Hoje há dois; o plano completo (dossiê, vendedor no WhatsApp, programador de
+sites, tráfego e Instagram) está em [`PROMPT_AGENTOS.md`](PROMPT_AGENTOS.md).
+
+| Agente | O que faz |
+| --- | --- |
+| **Analista de Nicho** | Para cada nicho × cidade, pede empresas ao Google Maps, mede quantas não têm site, visita uma amostra de sites para ver se são fracos e dá uma nota 0–100 com fatores publicados ("por que 89 pontos?"). Você fixa ou bane nichos. |
+| **Prospectador** | Pega os nichos mais bem ranqueados e cadastra como leads as empresas **sem site ou com site fraco** (filtro `weakWebsite`; "Sem site" e "Site ruim" juntos se excluem). Reaproveita o job da tela de Prospectar. |
+
+**Como funciona**
+
+- O **runner** sobe junto com o servidor (`src/instrumentation.ts`) e vive no
+  mesmo processo, porque o estado do CRM (snapshot e cache de leads) é por
+  processo: um segundo processo sobrescreveria o do servidor. Por isso os
+  agentes rodam **no seu computador** (`npm run build && npm start`), não na
+  Vercel. `AGENTS_RUNNER=off` desliga só o runner.
+- **Fila durável** (`agent_tasks`): lease, tentativas com backoff, 429 sem
+  queimar tentativa, tarefa interrompida é retomada ao reiniciar, e uma que
+  derruba o servidor repetidamente acaba falhando em vez de repetir para sempre.
+- **Modos por agente:** *Pausado* (nada roda), *Em aprovação* (o que o agente
+  decide iniciar vira um pedido em /agentes/aprovacao e só roda após o seu
+  clique; nasce assim) e *Automático*. Há um **interruptor geral**. "Executar
+  agora" por uma pessoa já conta como aprovação.
+- **Tetos diários** de requisições ao Google e de leads (a cota é paga). Ao
+  estourar, a tarefa espera o dia seguinte.
+- O dashboard só mostra o que foi contado no banco: sem dado, estado vazio.
+- Permissões: configurar, mudar modo, aprovar e fixar/banir exigem owner/admin;
+  executar agora e cancelar, qualquer perfil de escrita.
+
+Sem `GOOGLE_PLACES_API_KEY` os agentes usam o diretório de demonstração e tudo
+que produzem é marcado como **dados de demonstração**.
+
+**Supabase:** rode `database/migrations/0005_agentes.sql` (já está em
+`database/setup-producao.sql`) e confira com `node scripts/verificar-supabase.mjs`.
+Sem Supabase tudo funciona no `.data/db.json`.
+
 ## Roadmap
 
 - **Fase 2:** WhatsApp Business, Gmail/Calendar, cadências automatizadas com opt-out/LGPD, relatórios avançados.

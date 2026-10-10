@@ -26,6 +26,8 @@ import { pickEmail } from "@/services/enrichment";
 import { FILTER_LABEL, filterWarnings, rejectionReasons } from "@/services/lead-filter";
 import { createProspectingJob } from "@/jobs/prospecting";
 import { getCareerData } from "@/services/career/repository";
+import { getAgentData } from "@/services/agents/repository";
+import { probeSource } from "@/services/source-probe";
 import { visibleLeads } from "@/services/lead-visibility";
 import type { Lead, ProspectingJob, SearchParams } from "@/types";
 
@@ -325,13 +327,15 @@ servidor.registerTool(
 
     const quantidade = args.quantidade ?? 60;
     const inicio = Date.now();
-    const empresas = await provider.search({
+    // A mesma sondagem que o Agente 1 usa; aqui sem visitar sites (probeSites: 0).
+    const sonda = await probeSource({
       niche: args.nicho,
       country: args.pais ?? "Brasil",
       city: args.cidade,
-      quantity: quantidade,
-      filters: {},
+      sample: quantidade,
+      probeSites: 0,
     });
+    const empresas = sonda.companies;
     const pct = (n: number) => `${n} (${Math.round((n / Math.max(1, empresas.length)) * 100)}%)`;
     const semSite = empresas.filter((e) => !e.website);
 
@@ -591,6 +595,50 @@ servidor.registerTool(
         "",
         "FILA:",
         fila.length ? tabela([["tipo", "estado", "tentativas", "próxima", "último erro"], ...fila]) : "  vazia",
+      ].join("\n")
+    );
+  }
+);
+
+/* ------------------------------------------------------------------ */
+/* 10. Estado dos agentes                                              */
+/* ------------------------------------------------------------------ */
+
+servidor.registerTool(
+  "agentes_estado",
+  {
+    title: "Estado do AgentOS",
+    description:
+      "Fila de tarefas dos agentes, pedidos de aprovação, nichos ranqueados e os últimos eventos, lidos do banco local (.data/db.json). Somente leitura: o runner roda dentro do servidor do app, em outro processo, então este retrato é o do último salvamento. Serve para ver se uma tarefa travou ou o que o Analista de Nicho decidiu.",
+    inputSchema: {},
+    annotations: { readOnlyHint: true },
+  },
+  async () => {
+    const a = getAgentData();
+    const modos = a.settings.map((s) => `${s.id}: ${s.mode}`).join(", ") || "padrões (nenhuma configuração gravada)";
+    const fila = a.tasks
+      .filter((t) => t.status === "pendente" || t.status === "processando" || t.status === "falhou")
+      .slice(-12)
+      .map((t) => [t.agent, t.kind, t.status, `tent. ${t.attempts}/${t.max_attempts}`, t.next_run_at.slice(0, 16), (t.last_error ?? "").slice(0, 40)]);
+    const nichos = [...a.niche_targets]
+      .sort((x, y) => y.score - x.score)
+      .slice(0, 8)
+      .map((n) => [String(n.score), n.niche_label, n.city, n.status, n.source]);
+    const pendentes = a.approvals.filter((p) => p.status === "pendente");
+
+    return texto(
+      [
+        `Modos: ${modos}`,
+        `Tarefas: ${a.tasks.length} · eventos: ${a.events.length} · nichos: ${a.niche_targets.length} · aprovações pendentes: ${pendentes.length}`,
+        "",
+        "FILA (pendentes, rodando e falhas):",
+        fila.length ? tabela([["agente", "tipo", "estado", "tentativas", "próxima", "último erro"], ...fila]) : "  vazia",
+        "",
+        "NICHOS (melhores):",
+        nichos.length ? tabela([["nota", "nicho", "cidade", "estado", "fonte"], ...nichos]) : "  nenhum analisado",
+        "",
+        "ÚLTIMOS EVENTOS:",
+        a.events.slice(-8).map((e) => `  ${e.created_at.slice(11, 19)} [${e.level}] ${e.message}`).join("\n") || "  nenhum",
       ].join("\n")
     );
   }
