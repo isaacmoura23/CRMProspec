@@ -162,6 +162,33 @@ export interface SpendEntry {
   created_at: string;
 }
 
+/**
+ * Estado da conexão do WhatsApp como o CRM o conhece: espelho do que o gateway
+ * reportou por webhook. A tela de conexão consulta o gateway ao vivo; este
+ * registro é o que sobra quando o gateway está fora do ar e alimenta o aviso
+ * global de "WhatsApp desconectado".
+ */
+export interface WhatsappLink {
+  id: string; // id da sessão no gateway
+  organization_id: string;
+  status: "DISCONNECTED" | "QR" | "CONNECTING" | "CONNECTED" | "NEEDS_RECONNECT";
+  phone: string | null;
+  push_name: string | null;
+  last_error: string | null;
+  dry_run: boolean;
+  /** Quando aconteceu a mudança (relógio do gateway) — protege contra evento fora de ordem. */
+  last_event_at: string;
+  updated_at: string;
+}
+
+/** Eventos do gateway já recebidos: a chave de deduplicação dos webhooks. */
+export interface WhatsappReceipt {
+  id: string; // id do evento
+  organization_id: string;
+  type: string;
+  received_at: string;
+}
+
 export interface AgentData {
   settings: AgentSettingsRow[];
   tasks: AgentTask[];
@@ -170,6 +197,8 @@ export interface AgentData {
   niche_targets: NicheTarget[];
   approvals: Approval[];
   spend: SpendEntry[];
+  whatsapp_link: WhatsappLink[];
+  whatsapp_receipts: WhatsappReceipt[];
 }
 
 export function emptyAgentData(): AgentData {
@@ -181,5 +210,7 @@ export function emptyAgentData(): AgentData {
     niche_targets: [],
     approvals: [],
     spend: [],
+    whatsapp_link: [],
+    whatsapp_receipts: [],
   };
 }

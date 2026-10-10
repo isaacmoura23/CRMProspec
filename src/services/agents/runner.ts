@@ -29,6 +29,7 @@ const EVENT_RETENTION_DAYS = 14;
 const APPROVAL_RETENTION_DAYS = 30;
 const SPEND_RETENTION_DAYS = 60;
 const HEARTBEAT_RETENTION_DAYS = 1;
+const RECEIPT_RETENTION_DAYS = 7;
 
 interface RunnerState {
   instance: string;
@@ -140,6 +141,8 @@ export async function housekeeping(now = Date.now()): Promise<void> {
   await repo.removeOlderThan("events", "created_at", daysAgo(now, EVENT_RETENTION_DAYS));
   await repo.removeOlderThan("spend", "created_at", daysAgo(now, SPEND_RETENTION_DAYS));
   await repo.removeOlderThan("heartbeats", "beat_at", daysAgo(now, HEARTBEAT_RETENTION_DAYS));
+  // Recibos de webhook: só precisam durar mais que a janela de reenvio do gateway.
+  await repo.removeOlderThan("whatsapp_receipts", "received_at", daysAgo(now, RECEIPT_RETENTION_DAYS));
   const old = (await repo.list("approvals")).filter(
     (a) => a.status !== "pendente" && a.created_at < daysAgo(now, APPROVAL_RETENTION_DAYS)
   );

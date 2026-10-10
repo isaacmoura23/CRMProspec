@@ -264,10 +264,17 @@ sites, tráfego e Instagram) está em [`PROMPT_AGENTOS.md`](PROMPT_AGENTOS.md).
 - Permissões: configurar, mudar modo, aprovar e fixar/banir exigem owner/admin;
   executar agora e cancelar, qualquer perfil de escrita.
 
+**WhatsApp (gateway):** o número dedicado à prospecção é conectado por um
+gateway à parte (`npm run gateway`), que guarda a sessão num SQLite próprio e
+entrega o estado da conexão ao CRM por webhook assinado, com caixa de saída
+durável. Tela em **/agentes/vendedor**. Nesta fase o gateway só conecta e
+reporta: **nenhuma mensagem é enviada** (modo de teste). Guia completo,
+riscos e operação em [`docs/WHATSAPP_LOCAL.md`](docs/WHATSAPP_LOCAL.md).
+
 Sem `GOOGLE_PLACES_API_KEY` os agentes usam o diretório de demonstração e tudo
 que produzem é marcado como **dados de demonstração**.
 
-**Supabase:** rode `database/migrations/0005_agentes.sql` (já está em
+**Supabase:** rode `database/migrations/0005_agentes.sql` e `0006_whatsapp.sql` (já estão em
 `database/setup-producao.sql`) e confira com `node scripts/verificar-supabase.mjs`.
 Sem Supabase tudo funciona no `.data/db.json`.
 

@@ -114,6 +114,30 @@ retomar sem precisar reconstruir o contexto.
   `agenteitalo`), cliente Anthropic (`scripts/set-anthropic-key.mjs` já existe),
   worker em processo separado (exige migrar o núcleo do CRM para o banco).
 
+### AgentOS: gateway de WhatsApp e tela de conexão — fase 3a (10/10/2026)
+- Gateway portado do `agenteitalo` (Cobra) em `gateway/`: Baileys 7, sessão e
+  chaves num **SQLite próprio** (`node:sqlite`, sem tocar o Supabase), reconexão
+  com espera, QR que expira sem leitura, estados reais, filtro de status/grupos,
+  modo de teste. Envio real **bloqueado** (501) até existir a política de envio.
+- Caixa de saída durável: eventos gravados antes de qualquer envio, entregues ao
+  CRM em ordem, por webhook com assinatura HMAC (janela de 5 min), reenviados com
+  espera crescente; o CRM deduplica pelo id do evento e ignora evento fora de ordem.
+- CRM: `POST /api/webhooks/whatsapp`, tabelas `whatsapp_link` e
+  `whatsapp_receipts` (migração `0006_whatsapp.sql`), `/agentes/vendedor`
+  (QR, conectar, desconectar, sair; só owner/admin), aviso global de "WhatsApp
+  desconectado" e `scripts/set-whatsapp-gateway.mjs` (gera as chaves sem exibi-las).
+- Verificado de verdade: gateway real obteve o **QR do WhatsApp** e a tela o
+  exibiu; o aviso global e o estado chegaram ao CRM pelo webhook assinado; com o
+  CRM derrubado, 3 eventos ficaram retidos e chegaram depois, na ordem e uma vez só.
+- Testes: `npm test` (gateway com socket falso: QR→conectado, queda, saída,
+  **reinício sem novo QR**, caixa de saída com CRM fora do ar; webhook; cliente;
+  filtro de status portado da Cobra).
+- **Não verificado:** a leitura do QR com um celular (exige o número dedicado) e,
+  portanto, "Conectado" com número real e o reinício do gateway **com sessão
+  pareada de verdade** (coberto só com socket falso); a migração `0006` no Supabase.
+- **Próximas fases:** 3b (política e ciclos de envio, aprovação, `recipient`),
+  3c (recebimento, classificação, reuniões, notificação ao seu WhatsApp).
+
 ## Pela metade — Supabase
 
 Objetivo: em produção o banco vive na memória da instância, então leads

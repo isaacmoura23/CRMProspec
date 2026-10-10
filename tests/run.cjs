@@ -9,7 +9,8 @@ const path = require("path");
 const dir = __dirname;
 const files = fs
   .readdirSync(dir)
-  .filter((f) => f.endsWith(".test.ts"))
+  // O gateway usa o Baileys, que é só ESM: seus testes são .mts (ESM nativo).
+  .filter((f) => f.endsWith(".test.ts") || f.endsWith(".test.mts"))
   .map((f) => path.join(dir, f));
 const only = process.argv.slice(2);
 const selected = only.length ? files.filter((f) => only.some((o) => f.includes(o))) : files;

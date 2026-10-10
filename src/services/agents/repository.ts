@@ -26,6 +26,8 @@ const TABLE: Record<AgentCollection, string> = {
   niche_targets: "niche_targets",
   approvals: "approvals",
   spend: "spend_ledger",
+  whatsapp_link: "whatsapp_link",
+  whatsapp_receipts: "whatsapp_receipts",
 };
 
 /** Chave natural de cada coleção (o `id` em todas, exceto onde o contrato diz outra coisa). */
@@ -95,6 +97,7 @@ function isDue(t: AgentTask, now: string): boolean {
 /** Teto de eventos guardados no snapshot: o log não pode inflar o db.json sem fim. */
 const LOCAL_EVENTS_CAP = 1_000;
 const LOCAL_SPEND_CAP = 5_000;
+const LOCAL_RECEIPTS_CAP = 2_000;
 
 export function getAgentData(): AgentData {
   const db = getDb();
@@ -138,6 +141,9 @@ class LocalAgentRepo implements AgentRepo {
     }
     if (col === "spend" && data.spend.length > LOCAL_SPEND_CAP) {
       data.spend = data.spend.slice(-LOCAL_SPEND_CAP);
+    }
+    if (col === "whatsapp_receipts" && data.whatsapp_receipts.length > LOCAL_RECEIPTS_CAP) {
+      data.whatsapp_receipts = data.whatsapp_receipts.slice(-LOCAL_RECEIPTS_CAP);
     }
   }
 
