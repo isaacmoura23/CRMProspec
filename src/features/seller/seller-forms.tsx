@@ -39,6 +39,7 @@ export function SellerConfigForm({ config, canAdmin }: { config: SellerConfig; c
   const [lookups, setLookups] = React.useState(String(config.lookups_per_day));
   const [pendingCap, setPendingCap] = React.useState(String(config.max_pending_approvals));
   const [onlyAgent, setOnlyAgent] = React.useState(config.only_agent_leads);
+  const [requireDossier, setRequireDossier] = React.useState(config.require_dossier);
 
   const toggleDay = (d: number) => setDays((prev) => (prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d].sort()));
 
@@ -58,6 +59,7 @@ export function SellerConfigForm({ config, canAdmin }: { config: SellerConfig; c
         lookups_per_day: Number(lookups),
         max_pending_approvals: Number(pendingCap),
         only_agent_leads: onlyAgent,
+        require_dossier: requireDossier,
       })
     );
   }
@@ -127,6 +129,13 @@ export function SellerConfigForm({ config, canAdmin }: { config: SellerConfig; c
             <span>
               <span className="block text-[13px] font-medium">Abordar só leads criados pelos agentes</span>
               <span className="block text-xs text-muted-foreground">Desmarcar libera também os leads que você cadastrou à mão ou importou.</span>
+            </span>
+          </label>
+          <label className="flex cursor-pointer items-start gap-2.5">
+            <input type="checkbox" className="mt-0.5 size-4 accent-[var(--color-primary)]" checked={requireDossier} onChange={(e) => setRequireDossier(e.target.checked)} disabled={!canAdmin} />
+            <span>
+              <span className="block text-[13px] font-medium">Só abordar quem já tem dossiê</span>
+              <span className="block text-xs text-muted-foreground">A mensagem passa a falar de algo comprovado pelo Analista de Presença Digital. Vale enquanto esse agente estiver ligado; pausá-lo libera o Vendedor.</span>
             </span>
           </label>
         </div>

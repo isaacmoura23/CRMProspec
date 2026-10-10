@@ -3,7 +3,7 @@
  * Espelha database/migrations/0005_agentes.sql.
  * ============================================================ */
 
-export const AGENT_IDS = ["niche-analyst", "prospector", "seller"] as const;
+export const AGENT_IDS = ["niche-analyst", "prospector", "presence", "seller"] as const;
 export type AgentId = (typeof AGENT_IDS)[number];
 
 export function isAgentId(value: string): value is AgentId {
@@ -154,7 +154,7 @@ export interface Approval {
   expires_at: string;
 }
 
-export type SpendKind = "places_requests" | "leads" | "llm_tokens" | "whatsapp_lookups";
+export type SpendKind = "places_requests" | "leads" | "llm_tokens" | "whatsapp_lookups" | "dossiers";
 
 export interface SpendEntry {
   id: string;
@@ -336,6 +336,82 @@ export interface OwnerNotice {
   sent_at: string | null;
 }
 
+/* ------------------------------------------------------------------ */
+/* Agente 3 — dossiê de presença digital                               */
+/* ------------------------------------------------------------------ */
+
+export type DossierSourceKey = "site" | "google_maps" | "instagram" | "facebook" | "link_bio" | "youtube" | "mercadolivre" | "olx";
+/** `bloqueada` = a fonte pediu login ou barrou o acesso: aparece como tal e baixa a confiança, nunca vira invenção. */
+export type DossierSourceStatus = "concluida" | "parcial" | "bloqueada" | "pendente";
+
+export interface DossierSource {
+  key: DossierSourceKey;
+  label: string;
+  status: DossierSourceStatus;
+  url: string | null;
+  fetched_at: string | null;
+  /** Por que está parcial, bloqueada ou pendente, em linguagem de interface. */
+  note: string | null;
+}
+
+/** Trecho público que sustenta uma afirmação: de onde veio e o que dizia. */
+export interface DossierEvidence {
+  source: DossierSourceKey;
+  url: string | null;
+  excerpt: string;
+}
+
+export type DossierFindingKind = "oferta" | "identidade" | "contato" | "presenca" | "destaque" | "lacuna" | "problema";
+
+export interface DossierFinding {
+  id: string;
+  kind: DossierFindingKind;
+  claim: string;
+  /** Sempre há ao menos uma: afirmação sem evidência não entra no dossiê. */
+  evidence: DossierEvidence[];
+}
+
+export interface RubricItem {
+  key: string;
+  label: string;
+  /** 0 a 5. */
+  score: number;
+  /** O que foi medido, com o dado concreto. */
+  evidence: string;
+}
+
+export interface SiteAssessment {
+  method: "regras" | "regras+visual";
+  rubric: RubricItem[];
+  /** 0 a 100. */
+  total: number;
+  label: "ruim" | "desatualizado" | "bom";
+  reasons: string[];
+  /** Capturas feitas (só com a avaliação visual ligada). */
+  screenshots: Array<{ viewport: "desktop" | "mobile"; bytes: number }>;
+}
+
+export interface LeadDossier {
+  /** O id é o do lead: um dossiê por lead, refeito de tempos em tempos. */
+  id: string;
+  organization_id: string;
+  lead_id: string;
+  status: "concluido" | "parcial";
+  /** 0 a 100: cai a cada fonte bloqueada ou pendente. */
+  confidence: number;
+  sources: DossierSource[];
+  findings: DossierFinding[];
+  assessment: SiteAssessment | null;
+  /** Primeira frase do maior problema comprovado (alimenta a abordagem). */
+  headline_problem: string | null;
+  summary: string;
+  website_quality_before: string;
+  website_quality_after: string;
+  created_at: string;
+  updated_at: string;
+  valid_until: string;
+}
+
 export interface AgentData {
   settings: AgentSettingsRow[];
   tasks: AgentTask[];
@@ -352,6 +428,7 @@ export interface AgentData {
   conversation_state: ConversationState[];
   meetings: Meeting[];
   owner_notices: OwnerNotice[];
+  lead_dossiers: LeadDossier[];
 }
 
 export function emptyAgentData(): AgentData {
@@ -371,5 +448,6 @@ export function emptyAgentData(): AgentData {
     conversation_state: [],
     meetings: [],
     owner_notices: [],
+    lead_dossiers: [],
   };
 }

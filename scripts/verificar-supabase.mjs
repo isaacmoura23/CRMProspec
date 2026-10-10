@@ -72,6 +72,7 @@ const TABELAS = [
   ["conversation_state", "0008_conversa.sql"],
   ["meetings", "0008_conversa.sql"],
   ["owner_notices", "0008_conversa.sql"],
+  ["lead_dossiers", "0009_dossie.sql"],
 ];
 const pendentes = new Set();
 for (const [tabela, migracao] of TABELAS) {

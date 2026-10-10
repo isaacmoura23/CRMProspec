@@ -124,6 +124,11 @@ export interface SellerConfig {
   meeting_duration_min: number;
   /** WhatsApp pessoal do dono (E.164) que recebe o aviso de reunião marcada; `null` = sem aviso por WhatsApp. */
   owner_phone: string | null;
+  /**
+   * Só aborda quem já tem dossiê (Agente 3), para a mensagem falar de algo comprovado.
+   * Vale só enquanto o Agente 3 estiver ligado: pausá-lo libera o Vendedor.
+   */
+  require_dossier: boolean;
 }
 
 export const SELLER_DEFAULTS: SellerConfig = {
@@ -146,6 +151,7 @@ export const SELLER_DEFAULTS: SellerConfig = {
   meeting_min_notice_hours: 24,
   meeting_duration_min: 20,
   owner_phone: null,
+  require_dossier: true,
 };
 
 export function normalizeSellerConfig(raw: unknown): SellerConfig {
@@ -190,6 +196,51 @@ export function normalizeSellerConfig(raw: unknown): SellerConfig {
     meeting_min_notice_hours: clampInt(r.meeting_min_notice_hours, 1, 168, d.meeting_min_notice_hours),
     meeting_duration_min: clampInt(r.meeting_duration_min, 10, 120, d.meeting_duration_min),
     owner_phone: normalizeBrazilianPhone(typeof r.owner_phone === "string" ? r.owner_phone : null),
+    require_dossier: r.require_dossier === undefined ? d.require_dossier : r.require_dossier !== false,
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* Agente 3 — Analista de Presença Digital                             */
+/* ------------------------------------------------------------------ */
+
+export interface PresenceConfig {
+  /** Dossiês montados por dia (cada um faz algumas requisições a sites públicos). */
+  dossiers_per_day: number;
+  /** Dias até refazer o dossiê de um lead. */
+  refresh_days: number;
+  /** Só monta dossiê para leads com score a partir daqui. */
+  min_lead_score: number;
+  /** Só leads criados pelos agentes. */
+  only_agent_leads: boolean;
+  /** Espera entre duas requisições ao mesmo dossiê, para não martelar os sites. */
+  fetch_delay_ms: number;
+  /**
+   * Avaliação visual do site (capturas desktop e celular lidas por um modelo com visão).
+   * Exige Chrome ou Edge instalado e ANTHROPIC_API_KEY; desligada por padrão.
+   */
+  visual: boolean;
+}
+
+export const PRESENCE_DEFAULTS: PresenceConfig = {
+  dossiers_per_day: 30,
+  refresh_days: 30,
+  min_lead_score: 40,
+  only_agent_leads: true,
+  fetch_delay_ms: 1_500,
+  visual: false,
+};
+
+export function normalizePresenceConfig(raw: unknown): PresenceConfig {
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const d = PRESENCE_DEFAULTS;
+  return {
+    dossiers_per_day: clampInt(r.dossiers_per_day, 0, 300, d.dossiers_per_day),
+    refresh_days: clampInt(r.refresh_days, 1, 180, d.refresh_days),
+    min_lead_score: clampInt(r.min_lead_score, 0, 100, d.min_lead_score),
+    only_agent_leads: r.only_agent_leads === undefined ? d.only_agent_leads : r.only_agent_leads !== false,
+    fetch_delay_ms: clampInt(r.fetch_delay_ms, 0, 10_000, d.fetch_delay_ms),
+    visual: r.visual === true,
   };
 }
 

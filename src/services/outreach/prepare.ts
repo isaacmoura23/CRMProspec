@@ -17,6 +17,8 @@ import { ensureLeadsLoaded } from "@/services/lead-repository";
 import { blockPhone, blockedKeys } from "@/services/outreach/blocklist";
 import { createOutreachCycle } from "@/services/outreach/cycles";
 import { humanLeadIds } from "@/services/conversation/state";
+import { getValidDossier } from "@/services/presence/build";
+import { isGloballyEnabled } from "@/services/agents/settings";
 import { whatsappGateway } from "@/services/whatsapp/config";
 import type { SellerConfig } from "@/agents/config";
 import type { Lead, LeadAnalysis } from "@/types";
@@ -37,6 +39,8 @@ import type { Approval } from "@/types/agents";
  */
 
 export const OUTREACH_PREPARE = "outreach.prepare";
+/** Consequência genérica (e verdadeira) que acompanha o problema comprovado pelo dossiê. */
+const DOSSIER_IMPACT = "Quem chega até vocês pelo Google ou pelo Instagram precisa entender rápido o que vocês oferecem e como falar com vocês.";
 const RECHECK_MS = 5 * 60_000;
 
 export async function agentCampaignIds(): Promise<Set<string>> {
@@ -46,18 +50,27 @@ export async function agentCampaignIds(): Promise<Set<string>> {
 /** Dados do que já existe em volta dos leads, carregados uma vez para avaliar muitos. */
 export async function loadOutreachContext() {
   const repo = agentRepo();
-  const [blocked, cycles, approvals, campaigns, human] = await Promise.all([
+  const [blocked, cycles, approvals, campaigns, human, dossiers, cfg, presenceMode, globalOn] = await Promise.all([
     blockedKeys(),
     repo.list("outreach_cycles"),
     repo.list("approvals", { where: { kind: "outreach_message" } }),
     agentCampaignIds(),
     humanLeadIds(),
+    repo.list("lead_dossiers"),
+    getSellerConfig(),
+    getAgentMode("presence"),
+    isGloballyEnabled(),
   ]);
+  // O dossiê só é exigido enquanto o Agente 3 está ligado: pausá-lo libera o Vendedor.
+  const requireDossier = cfg.require_dossier && globalOn && presenceMode !== "pausado";
+  const nowIso = new Date().toISOString();
+  const ready = new Set(dossiers.filter((d) => d.valid_until > nowIso).map((d) => d.lead_id));
   const byLead = <T extends { lead_id?: string }>(rows: T[], leadId: string) => rows.filter((r) => r.lead_id === leadId);
   return {
     blocked,
     campaigns,
     isHuman: (leadId: string) => human.has(leadId),
+    dossierMissing: (leadId: string) => requireDossier && !ready.has(leadId),
     cyclesOf: (leadId: string) => byLead(cycles, leadId),
     approvalsOf: (leadId: string) => approvals.filter((a) => (a.payload as { lead_id?: string }).lead_id === leadId),
   };
@@ -144,6 +157,7 @@ async function prepare(ctx: AgentTaskContext): Promise<void> {
     approvals: around.approvalsOf(lead.id),
     agentCampaignIds: around.campaigns,
     humanControl: around.isHuman(lead.id),
+    dossierMissing: around.dossierMissing(lead.id),
   });
   if (why) {
     ctx.setResult({ skipped: why });
@@ -197,6 +211,9 @@ async function prepare(ctx: AgentTaskContext): Promise<void> {
     analysis = db.lead_analysis.find((a) => a.lead_id === lead.id);
   }
   if (!analysis) throw new PermanentTaskError(`Sem análise do lead ${lead.company_name}.`);
+  // O dossiê (Agente 3) é mais específico que a análise genérica: a mensagem fala do problema que ele comprovou.
+  const dossier = await getValidDossier(lead.id);
+  if (dossier?.headline_problem) analysis = { ...analysis, main_problem: dossier.headline_problem, problem_impact: DOSSIER_IMPACT };
   const composed = await composeBody(lead, analysis, touch);
   if (!composed.ok) throw new PermanentTaskError(`A mensagem não passou pela política de envio: ${composed.reason}`);
 
@@ -230,6 +247,7 @@ export async function firstTouchCandidates(cfg: SellerConfig, limit: number): Pr
           approvals: around.approvalsOf(lead.id),
           agentCampaignIds: around.campaigns,
           humanControl: around.isHuman(lead.id),
+          dossierMissing: around.dossierMissing(lead.id),
         }) === null
     )
     .sort((a, b) => (b.lead_score ?? 0) - (a.lead_score ?? 0))

@@ -13,6 +13,8 @@ import { canAdminister, canWrite } from "@/lib/permissions";
 import { AutoRefresh, ModeSelect } from "@/features/agents/controls";
 import { MODE_BADGE, MODE_LABEL } from "@/features/agents/labels";
 import { NichePanel } from "@/features/agents/niche-panel";
+import { DossierList, PresenceConfigForm } from "@/features/presence/presence-panel";
+import { getPresencePanel } from "@/services/presence/panel";
 import { ProspectorPanel } from "@/features/agents/prospector-panel";
 import { EventList, TaskList } from "@/features/agents/task-list";
 import { getAgentDetail, getRunnerStatus } from "@/services/agents/overview";
@@ -37,6 +39,7 @@ export default async function AgentePage({ params }: { params: Promise<{ id: str
   const runner = await getRunnerStatus();
   const canAdmin = canAdminister(user.role);
   const canRun = canWrite(user.role);
+  const presencePanel = id === "presence" ? await getPresencePanel() : null;
 
   return (
     <div>
@@ -69,6 +72,13 @@ export default async function AgentePage({ params }: { params: Promise<{ id: str
             canRun={canRun}
             runnerAlive={runner.alive}
           />
+        )}
+
+        {presencePanel && (
+          <>
+            <DossierList rows={presencePanel.rows} waiting={presencePanel.waiting} doneToday={presencePanel.doneToday} perDay={presencePanel.config.dossiers_per_day} canRun={canRun} />
+            <PresenceConfigForm config={presencePanel.config} visual={presencePanel.visual} canAdmin={canAdmin} />
+          </>
         )}
 
         <div className="grid gap-6 lg:grid-cols-2">

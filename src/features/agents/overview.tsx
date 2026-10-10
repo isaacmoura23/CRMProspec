@@ -108,7 +108,9 @@ export function AgentCards({ data, canAdmin }: { data: AgentsOverview; canAdmin:
             </dl>
             <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <Wallet className="size-3.5" />
-              {a.id === "seller"
+              {a.id === "presence"
+                ? `Hoje: ${formatNumber(a.spent.dossiers)} dossiês montados`
+                : a.id === "seller"
                 ? `Hoje: ${formatNumber(a.spent.whatsapp_lookups)} consultas de número no WhatsApp`
                 : `Hoje: ${formatNumber(a.spent.places_requests)} requisições ao Google${a.id === "prospector" ? ` · ${formatNumber(a.spent.leads)} leads` : ""}`}
             </p>

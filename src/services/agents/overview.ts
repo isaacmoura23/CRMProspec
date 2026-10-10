@@ -33,7 +33,7 @@ export interface AgentSummary {
   failedLast24h: number;
   completedLast24h: number;
   lastRun: { kind: string; status: AgentTask["status"]; at: string; error: string | null } | null;
-  spent: { places_requests: number; leads: number; whatsapp_lookups: number };
+  spent: { places_requests: number; leads: number; whatsapp_lookups: number; dossiers: number };
 }
 
 export interface FunnelStep {
@@ -86,7 +86,7 @@ export async function getAgentsOverview(): Promise<AgentsOverview> {
     AGENTS.map(async (a) => {
       const mine = tasks.filter((t) => t.agent === a.id);
       const last = mine.find((t) => t.status !== "pendente") ?? mine[0];
-      const sum = (kind: "places_requests" | "leads" | "whatsapp_lookups") =>
+      const sum = (kind: "places_requests" | "leads" | "whatsapp_lookups" | "dossiers") =>
         spend.filter((s) => s.agent === a.id && s.kind === kind).reduce((n, s) => n + s.amount, 0);
       return {
         id: a.id,
@@ -100,7 +100,7 @@ export async function getAgentsOverview(): Promise<AgentsOverview> {
         lastRun: last
           ? { kind: last.kind, status: last.status, at: last.finished_at ?? last.updated_at, error: last.last_error }
           : null,
-        spent: { places_requests: sum("places_requests"), leads: sum("leads"), whatsapp_lookups: sum("whatsapp_lookups") },
+        spent: { places_requests: sum("places_requests"), leads: sum("leads"), whatsapp_lookups: sum("whatsapp_lookups"), dossiers: sum("dossiers") },
       };
     })
   );

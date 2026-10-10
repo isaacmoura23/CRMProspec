@@ -67,16 +67,16 @@ describe("interruptor geral e modos", () => {
 
   it("por padrão está ligado e cada agente nasce em aprovação", async () => {
     assert.equal(await isGloballyEnabled(), true);
-    assert.deepEqual(await runnableAgents(), ["niche-analyst", "prospector", "seller"]);
+    assert.deepEqual(await runnableAgents(), ["niche-analyst", "prospector", "presence", "seller"]);
   });
 
   it("desligar o geral para todos; pausar um agente tira só ele", async () => {
     await saveSettings("prospector", { mode: "pausado" });
-    assert.deepEqual(await runnableAgents(), ["niche-analyst", "seller"]);
+    assert.deepEqual(await runnableAgents(), ["niche-analyst", "presence", "seller"]);
     await setGloballyEnabled(false);
     assert.deepEqual(await runnableAgents(), []);
     await setGloballyEnabled(true);
-    assert.deepEqual(await runnableAgents(), ["niche-analyst", "seller"]);
+    assert.deepEqual(await runnableAgents(), ["niche-analyst", "presence", "seller"]);
   });
 
   it("tarefa de agente pausado fica na fila e o runner não a executa", async () => {

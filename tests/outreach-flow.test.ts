@@ -150,13 +150,14 @@ async function prepareFor(lead: Lead, touch = 1) {
 
 let gateway: ReturnType<typeof stubGateway>;
 
-beforeEach(() => {
+beforeEach(async () => {
   process.env.WHATSAPP_GATEWAY_URL = "http://gateway.test";
   process.env.WHATSAPP_GATEWAY_TOKEN = "t".repeat(24);
   process.env.WHATSAPP_WEBHOOK_SECRET = SECRET;
   delete process.env.WHATSAPP_SESSION_ID;
   registerAgentHandlers();
   reset();
+  await saveSettings("presence", { mode: "pausado" });
 });
 
 afterEach(() => {

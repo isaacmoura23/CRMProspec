@@ -2,9 +2,11 @@ import "server-only";
 import {
   DEFAULT_AGENT_MODE,
   normalizeNicheAnalystConfig,
+  normalizePresenceConfig,
   normalizeProspectorConfig,
   normalizeSellerConfig,
   type NicheAnalystConfig,
+  type PresenceConfig,
   type ProspectorConfig,
   type SellerConfig,
 } from "@/agents/config";
@@ -77,6 +79,10 @@ export async function getNicheAnalystConfig(): Promise<NicheAnalystConfig> {
 
 export async function getSellerConfig(): Promise<SellerConfig> {
   return normalizeSellerConfig((await getSettingsRow("seller")).config);
+}
+
+export async function getPresenceConfig(): Promise<PresenceConfig> {
+  return normalizePresenceConfig((await getSettingsRow("presence")).config);
 }
 
 export async function getProspectorConfig(): Promise<ProspectorConfig> {

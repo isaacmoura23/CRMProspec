@@ -58,6 +58,8 @@ export interface EligibilityInput {
   agentCampaignIds: ReadonlySet<string> | null;
   /** Você assumiu a conversa deste lead: o agente não escreve mais nela. */
   humanControl?: boolean;
+  /** O Agente 3 está ligado, a política exige dossiê e este lead ainda não tem um válido. */
+  dossierMissing?: boolean;
 }
 
 /** Devolve por que o lead NÃO pode ser abordado agora, ou `null` se pode. */
@@ -66,6 +68,7 @@ export function leadEligibility(i: EligibilityInput): string | null {
 
   if (lead.archived) return "lead arquivado";
   if (i.humanControl) return "conversa assumida por você";
+  if (i.dossierMissing) return "o dossiê ainda não está pronto";
   if (touch < 1 || touch > cfg.max_touches) return "limite de toques atingido";
   const allowed = touch === 1 ? FIRST_TOUCH_STATUSES : FOLLOW_UP_STATUSES;
   if (!allowed.includes(lead.status)) return `status "${lead.status}" não recebe ${touch === 1 ? "primeira abordagem" : "acompanhamento"}`;

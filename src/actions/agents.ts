@@ -32,6 +32,8 @@ import { getDb, saveDb } from "@/lib/store";
 import { logActivity } from "@/services/activity";
 import { cancelPendingForLead, getConversationState, patchConversationState } from "@/services/conversation/state";
 import { whatsappGateway } from "@/services/whatsapp/config";
+import { DOSSIER_BUILD } from "@/services/presence/build";
+import { normalizePresenceConfig } from "@/agents/config";
 import { AGENT_MODES, isAgentId, type AgentId } from "@/types/agents";
 
 /**
@@ -130,6 +132,7 @@ const sellerConfigSchema = z.object({
   lookups_per_day: z.number().int().min(0).max(500),
   max_pending_approvals: z.number().int().min(1).max(50),
   only_agent_leads: z.boolean(),
+  require_dossier: z.boolean().optional(),
 });
 
 export async function saveSellerConfig(input: unknown): Promise<ActionResult> {
@@ -188,6 +191,39 @@ export async function saveConversationConfig(input: unknown): Promise<ActionResu
   await logAgentEvent("seller", "info", "agent.config", `${admin.name} atualizou as reuniões e o aviso ao WhatsApp.`);
   refresh();
   return ok(`Configuração de reuniões salva.${warning}`);
+}
+
+const presenceConfigSchema = z.object({
+  dossiers_per_day: z.number().int().min(0).max(300),
+  refresh_days: z.number().int().min(1).max(180),
+  min_lead_score: z.number().int().min(0).max(100),
+  only_agent_leads: z.boolean(),
+  fetch_delay_ms: z.number().int().min(0).max(10_000),
+  visual: z.boolean(),
+});
+
+export async function savePresenceConfig(input: unknown): Promise<ActionResult> {
+  const admin = await getAdminUser();
+  if (!admin) return fail(ADMIN_DENIED);
+  const parsed = presenceConfigSchema.safeParse(input);
+  if (!parsed.success) return fail("Configuração inválida. Revise os limites.");
+  await saveSettings("presence", { config: { ...normalizePresenceConfig(parsed.data) } });
+  await logAgentEvent("presence", "info", "agent.config", `${admin.name} atualizou a configuração do Analista de Presença Digital.`);
+  refresh();
+  return ok("Configuração salva.");
+}
+
+/** Monta (ou refaz) o dossiê de um lead agora, sem esperar o planejador. */
+export async function buildDossierNow(leadId: string): Promise<ActionResult> {
+  const user = await getWriterUser();
+  if (!user) return fail(WRITE_DENIED);
+  const lead = getDb().leads.find((l) => l.id === String(leadId));
+  if (!lead) return fail("Lead não encontrado.");
+  const blocked = await assertCanRun("presence");
+  if (blocked) return fail(blocked);
+  const { created } = await enqueueAgentTask({ agent: "presence", kind: DOSSIER_BUILD, payload: { lead_id: lead.id }, dedupeKey: `manual:${DOSSIER_BUILD}:${lead.id}`, createdBy: user.id });
+  refresh();
+  return ok(created ? "Dossiê na fila. Fica pronto em instantes." : "Já existe um dossiê deste lead na fila.");
 }
 
 /** Você assume a conversa: o agente para de escrever nesse lead e o que ele tinha a caminho é cancelado. */

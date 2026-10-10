@@ -264,6 +264,16 @@ sites, tráfego e Instagram) está em [`PROMPT_AGENTOS.md`](PROMPT_AGENTOS.md).
 - Permissões: configurar, mudar modo, aprovar e fixar/banir exigem owner/admin;
   executar agora e cancelar, qualquer perfil de escrita.
 
+**Dossiê (Agente 3):** o Analista de Presença Digital monta, para cada lead dos agentes, um
+dossiê só com conteúdo público: site atual (nota por seis critérios, com o dado medido em cada
+um), ficha do Google Maps, Instagram, Facebook, link na bio, YouTube, Mercado Livre e OLX. Cada
+fonte tem o seu estado (concluída, parcial, bloqueada, pendente) e **toda afirmação carrega a
+evidência** de onde veio; fonte que pede login ou barra o acesso aparece como bloqueada e baixa a
+confiança, nunca é contornada. O resultado atualiza a qualidade do site do lead (com o rastro no
+histórico) e a abordagem do Vendedor passa a falar do problema comprovado. Tela em
+**/agentes/presence** e aba “Dossiê” em cada lead. A avaliação visual (capturas lidas por um
+modelo) é opcional e vem desligada.
+
 **WhatsApp (gateway):** o número dedicado à prospecção é conectado por um
 gateway à parte (`npm run gateway`), que guarda a sessão num SQLite próprio e
 entrega o estado da conexão ao CRM por webhook assinado, com caixa de saída
@@ -281,7 +291,7 @@ completo, riscos e operação em [`docs/WHATSAPP_LOCAL.md`](docs/WHATSAPP_LOCAL.
 Sem `GOOGLE_PLACES_API_KEY` os agentes usam o diretório de demonstração e tudo
 que produzem é marcado como **dados de demonstração**.
 
-**Supabase:** rode `database/migrations/0005_agentes.sql`, `0006_whatsapp.sql`, `0007_vendedor.sql` e `0008_conversa.sql` (já estão em
+**Supabase:** rode `database/migrations/0005_agentes.sql`, `0006_whatsapp.sql`, `0007_vendedor.sql`, `0008_conversa.sql` e `0009_dossie.sql` (já estão em
 `database/setup-producao.sql`) e confira com `node scripts/verificar-supabase.mjs`.
 Sem Supabase tudo funciona no `.data/db.json`.
 

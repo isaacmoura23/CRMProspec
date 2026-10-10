@@ -226,6 +226,41 @@ retomar sem precisar reconstruir o contexto.
   WhatsApp (só o Vendedor envia).
 - **Próximas fases:** F2 (Agente 3, dossiê), F4 (Agente 5, sites) e F5 (anúncios e Instagram).
 
+### AgentOS: Analista de Presença Digital (dossiê) — fase 2 (11/10/2026)
+- **Agente 3** (`src/agents/presence/`, `src/services/presence/`): monta, para cada lead dos agentes (do maior
+  score ao menor, com teto por dia e no máximo 2 em montagem), um dossiê só com conteúdo público.
+  Entra na fila direto (só lê e só escreve o dossiê). Tela `/agentes/presence` e aba "Dossiê" no lead.
+- **Fontes, cada uma com estado** (concluída, parcial, bloqueada, pendente): site atual, ficha do Google
+  Maps (dados do próprio cadastro do Places), Instagram, Facebook, link na bio, YouTube, Mercado Livre e OLX.
+  Cliente HTTP anti-SSRF (DNS resolvido, IP conferido, conexão fixada, cada redirecionamento revalidado);
+  login, 403, 429 e desafio anti-robô viram **"bloqueada"** e baixam a confiança — nada é contornado.
+  Mercado Livre e OLX só pelos links que o próprio site publica (procurar por nome daria vendedor errado).
+- **Toda afirmação tem evidência:** o dossiê só aceita afirmação com trecho de origem; `validateDossier`
+  confere o conjunto e um dossiê que quebra a regra nem é gravado. Lead de demonstração: nada é consultado.
+- **Nota do site por rubrica** (seis critérios, 0 a 5, cada um com o dado medido): responsividade,
+  hierarquia, clareza da oferta, prova social, chamada para ação e atualização técnica. O resultado
+  **atualiza `website_quality`** (só com veredito completo; site barrado não muda nada) e os contatos que
+  o lead não tinha, sempre com o rastro no histórico. Domínio à venda, "em construção" e construtor
+  gratuito são "ruim"; sem a tag viewport nunca passa de "desatualizado".
+- **Avaliação visual (opcional, desligada):** captura desktop e celular com o Chrome/Edge instalado e envia
+  a um modelo com visão (Anthropic) uma nota por critério. A resposta é validada, limitada a 0–5 e a
+  observação é guardada como opinião do modelo. As imagens saem do computador: por isso vem desligada.
+- **Vendedor:** passa a exigir dossiê (configurável; vale só enquanto o Agente 3 está ligado — pausá-lo libera o
+  Vendedor) e a mensagem de abordagem fala do **problema que o dossiê comprovou** em vez da análise genérica.
+- Texto de páginas é dado, nunca instrução: teste de injeção cobre uma página que manda classificar o site
+  como "bom" e enviar dados a um número — a nota não muda.
+- Migração `0009_dossie.sql` (já no `setup-producao.sql` e no verificador), evento `lead.dossier_ready`.
+- Verificado de verdade: busca real a um site público (nota e motivos), Instagram real devolvendo "bloqueada",
+  bloqueio de 127.0.0.1 e do endereço de metadados, captura real desktop e celular com o Chrome instalado
+  (PNG válido), e no navegador: dossiês montados pelo runner, aba "Dossiê" do lead, qualidade do site
+  atualizada com rastro, sem rolagem lateral no celular.
+- Testes: `npm test` (387), `tsc`, `lint` e `build` limpos.
+- **Não verificado:** a leitura visual pelo modelo (não há chave da Anthropic neste ambiente: só a captura foi
+  exercitada, e a resposta do modelo por teste com simulação), Facebook/YouTube/Mercado Livre/OLX reais, e a
+  migração `0009` no Supabase. Os leads de teste foram removidos: `.data/db.json` voltou ao estado anterior.
+- **Limites:** sem transcrição de vídeo, sem ofertas detalhadas, imagens e tom de voz (a F4 precisa deles e os
+  extrai do próprio site), e sem Playwright — só o navegador instalado, em modo headless.
+
 ## Pela metade — Supabase
 
 Objetivo: em produção o banco vive na memória da instância, então leads

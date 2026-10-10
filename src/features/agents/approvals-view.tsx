@@ -29,6 +29,7 @@ const AGENT_LABEL: Record<string, string> = {
   "niche-analyst": "Analista de Nicho",
   prospector: "Prospectador",
   seller: "Vendedor",
+  presence: "Analista de Presença",
 };
 
 /** Mensagem de WhatsApp: o dono lê o texto exato, pode editar e só então aprova. */
