@@ -66,6 +66,9 @@ const TABELAS = [
   ["spend_ledger", "0005_agentes.sql"],
   ["whatsapp_link", "0006_whatsapp.sql"],
   ["whatsapp_receipts", "0006_whatsapp.sql"],
+  ["outreach_cycles", "0007_vendedor.sql"],
+  ["outreach_messages", "0007_vendedor.sql"],
+  ["channel_blocklist", "0007_vendedor.sql"],
 ];
 const pendentes = new Set();
 for (const [tabela, migracao] of TABELAS) {

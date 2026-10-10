@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { normalizeNicheAnalystConfig, normalizeProspectorConfig } from "@/agents/config";
 import { SUPPORTED_NICHES } from "@/agents/niche/agent";
@@ -28,6 +28,8 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 export default async function AgentePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   if (!isAgentId(id)) notFound();
+  // O Vendedor tem tela própria (conexão do WhatsApp, política de envio, fila e mensagens).
+  if (id === "seller") redirect("/agentes/vendedor");
   const agent = getAgent(id);
   const user = await getCurrentUser();
   const detail = await getAgentDetail(id);

@@ -19,6 +19,9 @@ export interface GatewayStatus {
   lastError: string | null;
   /** Gateway em modo de teste: nada é enviado de verdade. */
   dryRun: boolean;
+  /** Degrau do envio: tudo simulado, só a lista de teste recebe de verdade, ou todos. */
+  sendMode: "simulado" | "restrito" | "real";
+  allowedCount: number;
 }
 
 export interface GatewayHealth {

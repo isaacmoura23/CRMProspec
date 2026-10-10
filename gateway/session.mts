@@ -43,6 +43,10 @@ export interface PublicStatus {
   qrUpdatedAt: string | null;
   lastError: string | null;
   dryRun: boolean;
+  /** Em que degrau está o envio: tudo simulado, só a lista recebe de verdade, ou todos (com autorização). */
+  sendMode: "simulado" | "restrito" | "real";
+  /** Quantos números a lista de teste restrito tem. */
+  allowedCount: number;
 }
 
 /** Erro com o código HTTP e o tipo que o CRM entende (`kind`, como em ProviderError). */
@@ -171,8 +175,14 @@ export class SessionManager {
 
   /* ------------------------------ estado ------------------------------ */
 
+  private sendModeInfo(): { sendMode: PublicStatus["sendMode"]; allowedCount: number } {
+    const allowedCount = this.deps.allowedRecipients?.length ?? 0;
+    return { sendMode: this.deps.dryRun ? "simulado" : allowedCount > 0 ? "restrito" : "real", allowedCount };
+  }
+
   private publicOf(s: Live): PublicStatus {
     return {
+      ...this.sendModeInfo(),
       status: s.status,
       phone: s.phone,
       pushName: s.pushName,
@@ -196,6 +206,7 @@ export class SessionManager {
       qrUpdatedAt: null,
       lastError: row?.last_error ?? null,
       dryRun: this.deps.dryRun,
+      ...this.sendModeInfo(),
     };
   }
 

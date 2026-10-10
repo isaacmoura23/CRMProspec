@@ -83,12 +83,30 @@ export function ConnectionPanel({ initial, canConnect }: { initial: WhatsappPane
 
   return (
     <div className="space-y-4">
-      {state.status?.dryRun && (
+      {state.status?.sendMode === "simulado" && (
         <div role="status" className="flex items-start gap-3 rounded-lg border border-info/30 bg-info-soft px-4 py-3 text-[13px]">
           <AlertTriangle className="mt-0.5 size-4 shrink-0 text-info" />
           <p>
-            <strong className="font-medium">Modo de teste ativo.</strong> O gateway conecta de verdade e consulta números, mas <strong>nenhuma mensagem sai</strong> pelo
-            WhatsApp. O envio real só é liberado na fase da política de envio.
+            <strong className="font-medium">Envio simulado.</strong> O gateway conecta de verdade e consulta números, mas <strong>nenhuma mensagem sai</strong> pelo
+            WhatsApp: as mensagens aprovadas esperam na fila. Para testar com o seu próprio número, defina <code>WHATSAPP_ALLOWED_RECIPIENTS</code> no gateway.
+          </p>
+        </div>
+      )}
+      {state.status?.sendMode === "restrito" && (
+        <div role="status" className="flex items-start gap-3 rounded-lg border border-warning/40 bg-warning-soft px-4 py-3 text-[13px]">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" />
+          <p>
+            <strong className="font-medium">Teste restrito.</strong> Só {state.status.allowedCount === 1 ? "1 número da lista de teste recebe" : `${state.status.allowedCount} números da lista de teste recebem`}{" "}
+            mensagens de verdade; para todos os outros o envio é simulado.
+          </p>
+        </div>
+      )}
+      {state.status?.sendMode === "real" && (
+        <div role="alert" className="flex items-start gap-3 rounded-lg border border-danger/40 bg-danger-soft px-4 py-3 text-[13px]">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-danger" />
+          <p>
+            <strong className="font-medium">Envio real ligado.</strong> Mensagens aprovadas e autorizadas pela política saem de verdade para os leads, por um número que a Meta pode
+            restringir. Para voltar ao modo seguro, defina <code>WHATSAPP_GATEWAY_DRY_RUN=1</code> no gateway.
           </p>
         </div>
       )}

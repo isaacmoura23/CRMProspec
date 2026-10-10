@@ -267,14 +267,19 @@ sites, tráfego e Instagram) está em [`PROMPT_AGENTOS.md`](PROMPT_AGENTOS.md).
 **WhatsApp (gateway):** o número dedicado à prospecção é conectado por um
 gateway à parte (`npm run gateway`), que guarda a sessão num SQLite próprio e
 entrega o estado da conexão ao CRM por webhook assinado, com caixa de saída
-durável. Tela em **/agentes/vendedor**. Nesta fase o gateway só conecta e
-reporta: **nenhuma mensagem é enviada** (modo de teste). Guia completo,
-riscos e operação em [`docs/WHATSAPP_LOCAL.md`](docs/WHATSAPP_LOCAL.md).
+durável. Tela em **/agentes/vendedor**: conexão, fila de abordagem, mensagens
+enviadas, política de envio e lista de bloqueio. O **Vendedor** confirma que o
+número tem WhatsApp, escreve a primeira mensagem e a manda para **aprovação**
+(`/agentes/aprovacao`, com edição); só então ela entra na fila de envio, que
+respeita janela, teto diário, intervalo, máximo de 3 toques e aviso de saída. O
+envio real é ativado em degraus (simulado → só o seu número → real). Responder
+leads e marcar reuniões ficam para a próxima fase. Guia completo, riscos e
+operação em [`docs/WHATSAPP_LOCAL.md`](docs/WHATSAPP_LOCAL.md).
 
 Sem `GOOGLE_PLACES_API_KEY` os agentes usam o diretório de demonstração e tudo
 que produzem é marcado como **dados de demonstração**.
 
-**Supabase:** rode `database/migrations/0005_agentes.sql` e `0006_whatsapp.sql` (já estão em
+**Supabase:** rode `database/migrations/0005_agentes.sql`, `0006_whatsapp.sql` e `0007_vendedor.sql` (já estão em
 `database/setup-producao.sql`) e confira com `node scripts/verificar-supabase.mjs`.
 Sem Supabase tudo funciona no `.data/db.json`.
 

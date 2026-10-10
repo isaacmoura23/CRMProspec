@@ -138,6 +138,45 @@ retomar sem precisar reconstruir o contexto.
 - **Próximas fases:** 3b (política e ciclos de envio, aprovação, `recipient`),
   3c (recebimento, classificação, reuniões, notificação ao seu WhatsApp).
 
+### AgentOS: Vendedor, política e aprovação de mensagens — fase 3b (10/10/2026)
+- **Vendedor** (`src/agents/seller/`, `src/services/outreach/`): escolhe leads dos agentes
+  (score mínimo, celular brasileiro, fora da lista de bloqueio), confirma o WhatsApp
+  do número pelo gateway (`recipient`, com teto diário de consultas), escreve a
+  mensagem e a manda para **aprovação** (edição permitida; o aviso "responda PARE"
+  é recolocado se for apagado). Nome de contato inventado pelas fontes
+  automáticas nunca entra na mensagem.
+- **Ciclos de envio** (`outreach_cycles`, migração `0007_vendedor.sql`, já no
+  `setup-producao.sql`): um ativo por lead, reivindicação atômica, no máximo 3
+  toques espaçados. Política no CRM: janela (seg–sex 9–18h, São Paulo), teto
+  diário com aquecimento 10/20/30→máximo, intervalo aleatório, bloqueio.
+- **Esperar não é falhar:** desconectado, modo pausado, fora da janela, teto ou
+  intervalo adiam sem gastar tentativa; mensagem aprovada que passou do dia da
+  etapa vira obsoleta e não sai. **Timeout vira "incerto" e nunca é reenviado**;
+  um evento de entrega posterior o resolve.
+- **Gateway só envia com autorização assinada pelo CRM** (HMAC preso a sessão,
+  número, texto, referência e 2 min), com idempotência própria. Degraus:
+  simulado → teste restrito (`WHATSAPP_ALLOWED_RECIPIENTS`) → real. A tela mostra
+  o degrau atual e o gateway ganhou `GATEWAY_SIMULATE=1` (socket falso, só para desenvolvimento).
+- Tela `/agentes/vendedor`: conexão, números do dia, fila, mensagens enviadas
+  (enviada → entregue → lida), política editável, lista de bloqueio, tarefas e
+  registro. Aprovação em `/agentes/aprovacao` com texto exato e edição.
+- Verificado de verdade, ponta a ponta no navegador, com o gateway em modo
+  simulado + teste restrito: 6 mensagens chegaram para aprovação, uma foi
+  editada e aprovada, o gateway recusou-a enquanto o número não estava na lista
+  (ficou "Agendada") e a enviou depois que entrou; o histórico foi enviada →
+  entregue → lida e o texto enviado trazia a edição e o aviso de saída. A política
+  inválida é recusada e a válida salva; sem rolagem lateral no celular.
+- Testes: `npm test` (308), `tsc`, `lint` e `build` limpos.
+- **Não verificado:** envio por um número de verdade (o gateway simulado troca o
+  WhatsApp por um socket falso; falta o seu número dedicado) e a migração `0007`
+  no Supabase. Os leads de teste e o gateway simulado foram desfeitos: `.data/db.json`
+  voltou ao estado anterior.
+- **Para ativar de verdade (passo 2):** conecte o número dedicado, ponha o seu
+  número em `WHATSAPP_ALLOWED_RECIPIENTS` e `WHATSAPP_GATEWAY_DRY_RUN=0` no
+  `.env.gateway`, reinicie o gateway e aprove uma mensagem de um lead de teste
+  com o seu telefone. O passo 3 (real) é seu: ver `docs/WHATSAPP_LOCAL.md`.
+- **Próximas fases:** 3c (recebimento, classificação, reuniões, notificação ao seu WhatsApp).
+
 ## Pela metade — Supabase
 
 Objetivo: em produção o banco vive na memória da instância, então leads

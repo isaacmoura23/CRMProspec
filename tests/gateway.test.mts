@@ -505,6 +505,15 @@ describe("envio real: só com a autorização do CRM", () => {
     assert.deepEqual(sock.sent, [{ jid: "5541988887777@s.whatsapp.net", text: TEXT }]);
   });
 
+  it("o status público informa o degrau de envio: simulado, restrito ou real", async () => {
+    const sim = makeManager({ dryRun: true, allowedRecipients: ["+5541988887777"] });
+    assert.deepEqual({ m: sim.manager.status("atlas").sendMode, n: sim.manager.status("atlas").allowedCount }, { m: "simulado", n: 1 }, "DRY_RUN vence a lista: nada sai");
+    const restr = makeManager({ dryRun: false, sendSecret: SECRET, allowedRecipients: ["+5541988887777"] });
+    assert.equal(restr.manager.status("atlas").sendMode, "restrito");
+    const real = makeManager({ dryRun: false, sendSecret: SECRET });
+    assert.deepEqual({ m: real.manager.status("atlas").sendMode, n: real.manager.status("atlas").allowedCount }, { m: "real", n: 0 });
+  });
+
   it("sem autorização, expirada, adulterada ou de outro texto/número/sessão: nada sai (403)", async () => {
     const { h, sock, authFor } = await realSender();
     const attempts: Array<[string, unknown]> = [

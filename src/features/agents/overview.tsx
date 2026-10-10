@@ -84,7 +84,7 @@ export function AgentCards({ data, canAdmin }: { data: AgentsOverview; canAdmin:
               <CardDescription>{a.description}</CardDescription>
             </div>
             <Link
-              href={`/agentes/${a.id}`}
+              href={a.id === "seller" ? "/agentes/vendedor" : `/agentes/${a.id}`}
               className="inline-flex shrink-0 items-center gap-1 text-[13px] font-medium text-primary hover:underline"
             >
               Abrir <ArrowRight className="size-3.5" />
@@ -108,8 +108,9 @@ export function AgentCards({ data, canAdmin }: { data: AgentsOverview; canAdmin:
             </dl>
             <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <Wallet className="size-3.5" />
-              Hoje: {formatNumber(a.spent.places_requests)} requisições ao Google
-              {a.id === "prospector" ? ` · ${formatNumber(a.spent.leads)} leads` : ""}
+              {a.id === "seller"
+                ? `Hoje: ${formatNumber(a.spent.whatsapp_lookups)} consultas de número no WhatsApp`
+                : `Hoje: ${formatNumber(a.spent.places_requests)} requisições ao Google${a.id === "prospector" ? ` · ${formatNumber(a.spent.leads)} leads` : ""}`}
             </p>
             <p className="text-xs text-muted-foreground">
               {a.lastRun

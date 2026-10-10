@@ -19,6 +19,8 @@ export interface WhatsappPanelState {
     qrUpdatedAt: string | null;
     lastError: string | null;
     dryRun: boolean;
+    sendMode: "simulado" | "restrito" | "real";
+    allowedCount: number;
   } | null;
   /** Eventos esperando para chegar ao CRM (e os que o CRM recusou). */
   outbox: { pending: number; dead: number } | null;

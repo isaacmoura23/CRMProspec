@@ -39,6 +39,7 @@ export const TASK_STATUS_BADGE: Record<AgentTaskStatus, "neutral" | "info" | "go
 export const KIND_LABEL: Record<string, string> = {
   "niche.analyze": "Analisar nichos",
   "prospect.run": "Prospectar",
+  "outreach.prepare": "Preparar abordagem",
 };
 
 export function kindLabel(kind: string): string {

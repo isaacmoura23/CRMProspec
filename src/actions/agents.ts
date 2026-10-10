@@ -8,7 +8,10 @@ import {
   normalizeFilters,
   normalizeNicheAnalystConfig,
   normalizeProspectorConfig,
+  normalizeSellerConfig,
 } from "@/agents/config";
+import { normalizeBrazilianPhone } from "@/lib/outreach-policy";
+import { blockPhone, unblockPhone } from "@/services/outreach/blocklist";
 import { NICHE_ANALYZE, SUPPORTED_NICHES } from "@/agents/niche/agent";
 import { PROSPECT_RUN } from "@/agents/prospector/agent";
 import { getAdminUser, getWriterUser } from "@/lib/auth";
@@ -108,6 +111,57 @@ export async function saveProspectorConfig(input: unknown): Promise<ActionResult
   return ok("Configuração salva.");
 }
 
+const sellerConfigSchema = z.object({
+  send_days: z.array(z.number().int().min(1).max(7)).max(7),
+  start_hour: z.number().int().min(0).max(23),
+  end_hour: z.number().int().min(1).max(24),
+  daily_cap_max: z.number().int().min(0).max(200),
+  warmup: z.boolean(),
+  min_gap_seconds: z.number().int().min(10).max(3600),
+  max_gap_seconds: z.number().int().min(10).max(7200),
+  touch_spacing_days: z.array(z.number().int().min(1).max(30)).min(1).max(2),
+  max_touches: z.number().int().min(1).max(3),
+  min_lead_score: z.number().int().min(0).max(100),
+  lookups_per_day: z.number().int().min(0).max(500),
+  max_pending_approvals: z.number().int().min(1).max(50),
+  only_agent_leads: z.boolean(),
+});
+
+export async function saveSellerConfig(input: unknown): Promise<ActionResult> {
+  const admin = await getAdminUser();
+  if (!admin) return fail(ADMIN_DENIED);
+  const parsed = sellerConfigSchema.safeParse(input);
+  if (!parsed.success) return fail("Configuração inválida. Revise a janela, os tetos e os intervalos.");
+  if (parsed.data.send_days.length === 0) return fail("Escolha ao menos um dia da semana para enviar.");
+  if (parsed.data.end_hour <= parsed.data.start_hour) return fail("O horário final precisa ser depois do inicial.");
+  await saveSettings("seller", { config: { ...normalizeSellerConfig(parsed.data) } });
+  await logAgentEvent("seller", "info", "agent.config", `${admin.name} atualizou a política de envio.`);
+  refresh();
+  return ok("Política de envio salva.");
+}
+
+const blockSchema = z.object({ phone: z.string().trim().min(8).max(30), reason: z.string().trim().max(120).optional() });
+
+export async function blockNumber(input: unknown): Promise<ActionResult> {
+  const admin = await getAdminUser();
+  if (!admin) return fail(ADMIN_DENIED);
+  const parsed = blockSchema.safeParse(input);
+  if (!parsed.success) return fail("Informe um telefone.");
+  const phone = normalizeBrazilianPhone(parsed.data.phone);
+  if (!phone) return fail("Telefone inválido. Use o formato brasileiro, com DDD (ex.: (41) 99999-8888).");
+  await blockPhone(phone, parsed.data.reason || "bloqueio manual", "manual");
+  refresh();
+  return ok("Número bloqueado: nenhuma mensagem será enviada a ele.");
+}
+
+export async function unblockNumber(phone: string): Promise<ActionResult> {
+  const admin = await getAdminUser();
+  if (!admin) return fail(ADMIN_DENIED);
+  const removed = await unblockPhone(String(phone));
+  refresh();
+  return removed ? ok("Número liberado.") : fail("O número não estava na lista.");
+}
+
 /** Recusa executar para agente pausado ou com tudo desligado: a tarefa ficaria parada sem ninguém saber. */
 async function assertCanRun(agent: AgentId): Promise<string | null> {
   if (!(await isGloballyEnabled())) return "Os agentes estão desligados. Ligue-os no interruptor geral.";
@@ -179,13 +233,19 @@ export async function cancelTask(taskId: string): Promise<ActionResult> {
   return ok("Tarefa cancelada.");
 }
 
-export async function decideAgentApproval(id: string, approve: boolean): Promise<ActionResult> {
+/**
+ * Aprovar ou recusar um pedido. `editedBody` só vale para mensagem de WhatsApp:
+ * o texto editado pelo dono passa pelas mesmas barreiras do gerado.
+ */
+export async function decideAgentApproval(id: string, approve: boolean, editedBody?: string): Promise<ActionResult> {
   const admin = await getAdminUser();
   if (!admin) return fail(ADMIN_DENIED);
-  const result = await decideApproval(id, Boolean(approve), admin.id);
+  const body = typeof editedBody === "string" && editedBody.length <= 4000 ? editedBody : undefined;
+  const result = await decideApproval(id, Boolean(approve), admin.id, { editedBody: body });
   refresh();
   if (!result.ok) return fail(result.error);
-  return ok(approve ? "Aprovado. A tarefa entrou na fila." : "Recusado.");
+  if (!approve) return ok("Recusado.");
+  return ok(result.approval.kind === "outreach_message" ? "Aprovado. A mensagem sai quando a política de envio permitir (janela, limite e intervalo)." : "Aprovado. A tarefa entrou na fila.");
 }
 
 export async function setNicheTargetStatus(id: string, status: string): Promise<ActionResult> {

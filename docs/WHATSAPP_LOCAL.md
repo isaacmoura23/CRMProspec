@@ -96,17 +96,27 @@ todas as páginas para esses perfis.
 
 ## Modo de teste
 
-`WHATSAPP_GATEWAY_DRY_RUN=1` é o padrão. O gateway **conecta de verdade** e pode
-consultar se um número tem WhatsApp, mas aceita pedidos de envio apenas
-simulando (`dryrun-…`), e só se estiver conectado. Mesmo com `DRY_RUN=0`, nesta
-fase o envio real continua bloqueado (HTTP 501): ele só existirá junto com a
-política de envio. Isso é de propósito.
+Há três degraus de envio, e a tela do Vendedor mostra em qual você está:
 
-A ativação do envio real seguirá a ordem usada na Cobra: (1) modo de teste e QR
-lido, número certo conectado; (2) fluxo completo contra o **seu próprio número**,
-conferindo que "saiu" no histórico enquanto o log do gateway diz "não enviada";
-(3) só então desligar o modo de teste, repetir com o seu número e acompanhar
-entregue/lido. O passo 3 é sempre seu, nunca de um agente.
+1. **Simulado** (`WHATSAPP_GATEWAY_DRY_RUN=1`, o padrão). O gateway **conecta de
+   verdade** e consulta se um número tem WhatsApp, mas aceita pedidos de envio só
+   simulando (`dryrun-…`), e só se estiver conectado. Nada sai.
+2. **Teste restrito** (`DRY_RUN=0` **e** `WHATSAPP_ALLOWED_RECIPIENTS=+55…` com o
+   seu número). Só os números da lista recebem de verdade; qualquer outro destino
+   continua simulado. É aqui que você confere o fluxo inteiro: o Vendedor
+   escolhe um lead de teste, a mensagem aparece em **/agentes/aprovacao**, você
+   aprova e ela chega no seu celular, com status enviada → entregue → lida.
+3. **Real** (`DRY_RUN=0` e lista vazia). O passo 3 é sempre seu: nenhum agente liga isso.
+
+Mesmo fora do modo simulado, **o gateway só envia com uma autorização assinada
+pelo CRM** em cada mensagem (HMAC com o segredo compartilhado, presa à sessão,
+ao número, ao texto e à referência, válida por 2 minutos). Quem alcançar a porta
+do gateway sem o segredo não consegue mandar nada. A mesma referência nunca
+envia duas vezes (tabela `sends` do gateway); se o WhatsApp não confirmar a tempo, o ciclo
+fica **incerto** e **nunca é reenviado**: um evento de entrega posterior o resolve.
+
+Para ver o fluxo sem número nenhum, `GATEWAY_SIMULATE=1` troca o WhatsApp por um
+socket falso (aprovar → enviar → entregue), só para desenvolvimento.
 
 ## Segurança
 
@@ -127,8 +137,22 @@ QR de novo.** Ele contém as credenciais do número: trate como segredo.
 
 Ver `.env.gateway.example`. As principais: `WHATSAPP_GATEWAY_TOKEN`,
 `WHATSAPP_WEBHOOK_SECRET`, `CRM_WEBHOOK_URL`, `GATEWAY_PORT`,
-`WHATSAPP_GATEWAY_DRY_RUN`, `GATEWAY_FORWARD_MESSAGES` (deixe `0` até a fase do
-Vendedor tratar mensagens) e `GATEWAY_DB_FILE`.
+`WHATSAPP_GATEWAY_DRY_RUN`, `WHATSAPP_ALLOWED_RECIPIENTS` (teste restrito),
+`GATEWAY_FORWARD_DELIVERY` (status de entrega ao CRM; padrão ligado),
+`GATEWAY_FORWARD_MESSAGES` (deixe `0` até a fase de respostas, F3c),
+`GATEWAY_SIMULATE` e `GATEWAY_DB_FILE`.
+
+## Política de envio do Vendedor
+
+Tudo isso é decidido no CRM, não no gateway, e editável em **/agentes/vendedor**:
+janela (padrão seg–sex, 9h–18h, horário de São Paulo), teto diário com
+aquecimento (10, 20, 30… até o máximo configurado), intervalo aleatório entre
+mensagens (60–180 s), no máximo 3 toques por lead com 3–4 dias entre eles, aviso
+de saída em toda mensagem e lista de bloqueio. Só entram celulares brasileiros
+confirmados no WhatsApp; o resto vira "sem WhatsApp" no registro. Esperar (fora
+da janela, teto atingido, WhatsApp desconectado, modo pausado) **não conta como
+tentativa** e nunca descarta a mensagem; já uma mensagem aprovada que ficou parada
+até o dia seguinte da etapa original é tratada como obsoleta e não sai.
 
 ## Diferenças em relação ao gateway da Cobra
 
@@ -141,7 +165,7 @@ envio desconectado. O que mudou:
   de lembretes nem criação de clientes** no gateway.
 - Em vez de gravar mensagens direto no banco, entrega **eventos assinados** ao
   CRM a partir de uma caixa de saída durável.
-- O envio real está **desligado** até existir a política de envio.
+- O envio só ocorre com **autorização assinada pelo CRM** por mensagem, e a política de envio mora no CRM.
 - Histórico do WhatsApp **não é importado** (o número é dedicado e novo).
 
 ## Problemas comuns

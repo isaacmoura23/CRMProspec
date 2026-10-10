@@ -48,6 +48,9 @@ export async function loadWhatsappPanelState(opts: { includeQr: boolean }): Prom
         qrUpdatedAt: status.qrUpdatedAt,
         lastError: status.lastError,
         dryRun: status.dryRun,
+        // Gateway de versão anterior não informa o degrau: tratar como simulado é o lado seguro.
+        sendMode: status.sendMode ?? (status.dryRun ? "simulado" : "real"),
+        allowedCount: status.allowedCount ?? 0,
       },
       outbox: health?.outbox ?? null,
       link: linkSummary,
