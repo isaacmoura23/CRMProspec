@@ -25,6 +25,7 @@ const searchSchema = z.object({
     noWebsite: z.boolean().optional(),
     hasWebsite: z.boolean().optional(),
     badWebsite: z.boolean().optional(),
+    weakWebsite: z.boolean().optional(),
     activeBusiness: z.boolean().optional(),
     hasReviews: z.boolean().optional(),
     strongSocial: z.boolean().optional(),

@@ -4,6 +4,7 @@
  * ============================================================ */
 
 import type { CareerData } from "@/types/career";
+import type { AgentData } from "@/types/agents";
 
 export type Role = "owner" | "admin" | "sdr" | "vendedor" | "viewer";
 
@@ -382,6 +383,8 @@ export interface SearchParams {
     noWebsite?: boolean;
     hasWebsite?: boolean;
     badWebsite?: boolean;
+    /** Sem site OU com site ruim/desatualizado (“Sem site” e “Site ruim” se excluem). */
+    weakWebsite?: boolean;
     activeBusiness?: boolean;
     hasReviews?: boolean;
     strongSocial?: boolean;
@@ -479,6 +482,8 @@ export interface Database {
   seen_source_ids?: string[];
   /** Módulo Carreira (currículos, vagas, candidaturas, fila). Criado sob demanda. */
   career?: CareerData;
+  /** AgentOS (fila, eventos, nichos, aprovações). Criado sob demanda. */
+  agents?: AgentData;
   settings: {
     default_niche: string;
     default_country: string;

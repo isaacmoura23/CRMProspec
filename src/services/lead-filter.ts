@@ -15,6 +15,7 @@ export const FILTER_LABEL: Record<string, string> = {
   noWebsite: "Sem site",
   hasWebsite: "Possui site",
   badWebsite: "Site potencialmente ruim",
+  weakWebsite: "Sem site ou site fraco",
   activeBusiness: "Empresa ativa",
   hasReviews: "Empresa com avaliações",
   strongSocial: "Presença forte em redes sociais",
@@ -37,6 +38,7 @@ export function rejectionReasons(raw: RawLead, f: SearchParams["filters"]): stri
   if (f.badWebsite && !(raw.website && (raw.website_quality === "ruim" || raw.website_quality === "desatualizado"))) {
     motivos.push("badWebsite");
   }
+  if (f.weakWebsite && !isWeakWebsite(raw)) motivos.push("weakWebsite");
   if (f.activeBusiness && raw.business_active === false) motivos.push("activeBusiness");
   if (f.hasReviews && (raw.reviews_count ?? 0) < 1) motivos.push("hasReviews");
   if (f.strongSocial && !(instagramHandle(raw.instagram) && (raw.instagram_active || raw.marketing_signals))) {
@@ -73,11 +75,24 @@ export function filterWarnings(f: SearchParams["filters"]): string[] {
       `${dependemDoSite.join(", ")} ${dependemDoSite.length > 1 ? "dependem" : "depende"} de visitar o site da empresa, e você pediu “Sem site”. A busca tende a voltar vazia — considere tirar “Sem site” ou esses critérios.`
     );
   }
+  if (f.weakWebsite && (f.noWebsite || f.badWebsite)) {
+    avisos.push("“Sem site ou site fraco” já cobre “Sem site” e “Site potencialmente ruim”: use só ele para trazer os dois tipos.");
+  }
   const exigencias = Object.entries(f).filter(([, v]) => v).length;
   if (exigencias >= 5 && avisos.length === 0) {
     avisos.push(`${exigencias} critérios ao mesmo tempo deixam poucas empresas de fora do descarte. Se vier vazio, tire os menos importantes.`);
   }
   return avisos;
+}
+
+/**
+ * Presença web fraca: não tem site, ou o site que tem foi medido como ruim ou
+ * desatualizado. É o OU que "Sem site" e "Site potencialmente ruim" não
+ * conseguem expressar juntos (os dois se excluem).
+ */
+export function isWeakWebsite(raw: Pick<RawLead, "website" | "website_quality">): boolean {
+  if (!raw.website) return true;
+  return raw.website_quality === "ruim" || raw.website_quality === "desatualizado";
 }
 
 export function matchesFilters(raw: RawLead, f: SearchParams["filters"]): boolean {
@@ -94,6 +109,7 @@ export function matchesFilters(raw: RawLead, f: SearchParams["filters"]): boolea
   ) {
     return false;
   }
+  if (f.weakWebsite && !isWeakWebsite(raw)) return false;
   if (f.activeBusiness && raw.business_active === false) return false;
   if (f.hasReviews && (raw.reviews_count ?? 0) < 1) return false;
   if (
@@ -114,7 +130,7 @@ export function matchesFilters(raw: RawLead, f: SearchParams["filters"]): boolea
  * sem nunca ter chegado perto do teto de 60 que a fonte permite.
  */
 export function hasRareFilters(f: SearchParams["filters"]): boolean {
-  return Boolean(f.noWebsite || f.badWebsite || f.hasEmail || f.strongSocial);
+  return Boolean(f.noWebsite || f.badWebsite || f.weakWebsite || f.hasEmail || f.strongSocial);
 }
 
 export function hasActiveFilters(f: SearchParams["filters"]): boolean {

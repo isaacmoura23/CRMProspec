@@ -41,7 +41,12 @@ function makeSteps(total: number): JobStep[] {
   ];
 }
 
-export function createProspectingJob(params: SearchParams, userId: string): ProspectingJob {
+/**
+ * Cria o registro do job (e a campanha, se houver) sem executá-lo. A tela de
+ * Prospectar dispara a execução com `after()`; o Agente 2 a aguarda dentro da
+ * própria tarefa da fila.
+ */
+export function registerProspectingJob(params: SearchParams): ProspectingJob {
   const db = getDb();
 
   let campaignId: string | null = null;
@@ -81,6 +86,11 @@ export function createProspectingJob(params: SearchParams, userId: string): Pros
   };
   db.prospecting_jobs.push(job);
   saveDb();
+  return job;
+}
+
+export function createProspectingJob(params: SearchParams, userId: string): ProspectingJob {
+  const job = registerProspectingJob(params);
 
   // roda após a resposta da action — em serverless (Vercel), after() mantém
   // a função viva até o job terminar, em vez de arriscar o corte da execução
@@ -90,9 +100,43 @@ export function createProspectingJob(params: SearchParams, userId: string): Pros
 }
 
 async function runProspectingJob(jobId: string, userId: string): Promise<void> {
-  const db = getDb();
-  const job = db.prospecting_jobs.find((j) => j.id === jobId);
+  const job = getDb().prospecting_jobs.find((j) => j.id === jobId);
   if (!job) return;
+  await executeProspecting(job, userId);
+}
+
+/** Quantas empresas pedir à fonte para entregar `quantity` depois de dedupe e filtros. */
+export function computeFetchTarget(
+  quantity: number,
+  filters: SearchParams["filters"],
+  providerId: string
+): number {
+  const overfetch = hasRareFilters(filters) ? 12 : hasActiveFilters(filters) ? 3 : 1.5;
+  // O Google entrega 60 por consulta, mas o provider soma as variações do
+  // nicho e chega a 240. Com critério raro vale usar essa folga: pedir 10
+  // empresas "sem site" em São Paulo varria 60 e achava 6, porque só 1 em
+  // cada 10 imobiliárias não tem site.
+  const teto = providerId === "google_places" ? 240 : 120;
+  // O excedente vale para qualquer fonte: sem ele o provider de diretório
+  // entrega exatamente `quantity` e o que cair em dedupe/filtro vira falta.
+  return Math.min(teto, Math.max(quantity + 5, Math.ceil(quantity * overfetch)));
+}
+
+export interface ProspectingHooks {
+  /** Chamado a cada requisição cobrada à fonte — base do teto diário do agente. */
+  onPlacesRequest?: () => void;
+}
+
+/**
+ * Executa um job já registrado. `userId` null = execução de agente sem pessoa
+ * por trás: não há a quem notificar nem a quem atribuir a atividade.
+ */
+export async function executeProspecting(
+  job: ProspectingJob,
+  userId: string | null,
+  hooks: ProspectingHooks = {}
+): Promise<void> {
+  const db = getDb();
 
   const step = (key: JobStep["key"]) => job.steps.find((s) => s.key === key)!;
 
@@ -104,18 +148,7 @@ async function runProspectingJob(jobId: string, userId: string): Promise<void> {
        duplicados e empresas descartadas pelos filtros */
     const provider = getActiveProvider();
     const filters = job.params.filters;
-    const overfetch = hasRareFilters(filters) ? 12 : hasActiveFilters(filters) ? 3 : 1.5;
-    // O Google entrega 60 por consulta, mas o provider soma as variações do
-    // nicho e chega a 240. Com critério raro vale usar essa folga: pedir 10
-    // empresas "sem site" em São Paulo varria 60 e achava 6, porque só 1 em
-    // cada 10 imobiliárias não tem site.
-    const teto = provider.id === "google_places" ? 240 : 120;
-    // O excedente vale para qualquer fonte: sem ele o provider de diretório
-    // entrega exatamente `quantity` e o que cair em dedupe/filtro vira falta.
-    const fetchTarget = Math.min(
-      teto,
-      Math.max(job.params.quantity + 5, Math.ceil(job.params.quantity * overfetch))
-    );
+    const fetchTarget = computeFetchTarget(job.params.quantity, filters, provider.id);
 
     // nunca repetir empresas de buscas anteriores, mesmo que os leads tenham sido removidos
     db.seen_source_ids ??= [];
@@ -127,12 +160,15 @@ async function runProspectingJob(jobId: string, userId: string): Promise<void> {
       .filter((l) => l.city.trim().toLowerCase() === city)
       .map((l) => l.company_name);
 
-    const raws = await provider.search({
-      ...job.params,
-      quantity: fetchTarget,
-      excludeSourceIds: db.seen_source_ids,
-      excludeNames: knownNames,
-    });
+    const raws = await provider.search(
+      {
+        ...job.params,
+        quantity: fetchTarget,
+        excludeSourceIds: db.seen_source_ids,
+        excludeNames: knownNames,
+      },
+      { onRequest: hooks.onPlacesRequest }
+    );
 
     const finding = step("finding");
     // Os contadores mostram o que realmente aconteceu. Antes eram escalados
@@ -227,16 +263,18 @@ async function runProspectingJob(jobId: string, userId: string): Promise<void> {
     if ((job.filtered ?? 0) > 0) notes.push(`${job.filtered} fora do perfil descartados`);
 
     // notificação de conclusão
-    db.notifications.unshift({
-      id: uid("ntf"),
-      organization_id: db.organization.id,
-      user_id: userId,
-      title: `Prospecção concluída: ${plural(job.found_lead_ids.length, "lead encontrado", "leads encontrados")}`,
-      body: notes.length > 0 ? `${notes.join(" · ")}.` : null,
-      link: `/leads`,
-      read: false,
-      created_at: nowIso(),
-    });
+    if (userId) {
+      db.notifications.unshift({
+        id: uid("ntf"),
+        organization_id: db.organization.id,
+        user_id: userId,
+        title: `Prospecção concluída: ${plural(job.found_lead_ids.length, "lead encontrado", "leads encontrados")}`,
+        body: notes.length > 0 ? `${notes.join(" · ")}.` : null,
+        link: `/leads`,
+        read: false,
+        created_at: nowIso(),
+      });
+    }
     saveDb();
   } catch (err) {
     job.status = "failed";
