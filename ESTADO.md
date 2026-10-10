@@ -92,6 +92,245 @@ retomar sem precisar reconstruir o contexto.
   `CRON_SECRET`, `CAREER_TOKEN_SECRET` e (opcional) OAuth do Gmail, Adzuna e
   OCR. A autenticação real continua pendente — sem ela, o módulo é demo.
 
+### AgentOS: fundação e Agentes 1 e 2 (10/10/2026)
+- Dashboard em `/agentes` (visão geral com funil real, uma página por agente e
+  `/agentes/aprovacao`), fila durável, runner no mesmo processo do servidor,
+  interruptor geral, modos pausado/aprovação/automático e tetos diários.
+- Analista de Nicho (sondagem medida na fonte + score explicável) e Prospectador
+  (reaproveita o job de prospecção). Filtro novo `weakWebsite` (sem site OU site
+  fraco), porque `noWebsite` e `badWebsite` se excluem.
+- Verificado no navegador, em produção local (`npm run build && npm start`):
+  análise → ranking, prospecção manual (20 leads), proposta automática em
+  aprovação → aprovar → 20 leads, teto diário atingido, interruptor geral
+  recusando execuções, estado preservado após reiniciar, perfil vendedor sem
+  controles de configuração, sem erro de console, celular sem rolagem lateral.
+- Testes: `npm test` (inclui fila, políticas, aprovações, planejador, score e
+  caracterização do job de prospecção). `mcp`: ferramenta `agentes_estado`.
+- **Não verificado:** a migração `0005_agentes.sql` e o repositório do Supabase
+  (`SupabaseAgentRepo`) — exigem um projeto Supabase de verdade (rode a 0005 e
+  `node scripts/verificar-supabase.mjs`). Nem a análise com `GOOGLE_PLACES_API_KEY`
+  real: no worktree de desenvolvimento só o diretório de demonstração foi exercitado.
+- **Fica para as próximas fases:** Agentes 3–7, gateway de WhatsApp (portar o do
+  `agenteitalo`), cliente Anthropic (`scripts/set-anthropic-key.mjs` já existe),
+  worker em processo separado (exige migrar o núcleo do CRM para o banco).
+
+### AgentOS: gateway de WhatsApp e tela de conexão — fase 3a (10/10/2026)
+- Gateway portado do `agenteitalo` (Cobra) em `gateway/`: Baileys 7, sessão e
+  chaves num **SQLite próprio** (`node:sqlite`, sem tocar o Supabase), reconexão
+  com espera, QR que expira sem leitura, estados reais, filtro de status/grupos,
+  modo de teste. Envio real **bloqueado** (501) até existir a política de envio.
+- Caixa de saída durável: eventos gravados antes de qualquer envio, entregues ao
+  CRM em ordem, por webhook com assinatura HMAC (janela de 5 min), reenviados com
+  espera crescente; o CRM deduplica pelo id do evento e ignora evento fora de ordem.
+- CRM: `POST /api/webhooks/whatsapp`, tabelas `whatsapp_link` e
+  `whatsapp_receipts` (migração `0006_whatsapp.sql`), `/agentes/vendedor`
+  (QR, conectar, desconectar, sair; só owner/admin), aviso global de "WhatsApp
+  desconectado" e `scripts/set-whatsapp-gateway.mjs` (gera as chaves sem exibi-las).
+- Verificado de verdade: gateway real obteve o **QR do WhatsApp** e a tela o
+  exibiu; o aviso global e o estado chegaram ao CRM pelo webhook assinado; com o
+  CRM derrubado, 3 eventos ficaram retidos e chegaram depois, na ordem e uma vez só.
+- Testes: `npm test` (gateway com socket falso: QR→conectado, queda, saída,
+  **reinício sem novo QR**, caixa de saída com CRM fora do ar; webhook; cliente;
+  filtro de status portado da Cobra).
+- **Não verificado:** a leitura do QR com um celular (exige o número dedicado) e,
+  portanto, "Conectado" com número real e o reinício do gateway **com sessão
+  pareada de verdade** (coberto só com socket falso); a migração `0006` no Supabase.
+- **Próximas fases:** 3b (política e ciclos de envio, aprovação, `recipient`),
+  3c (recebimento, classificação, reuniões, notificação ao seu WhatsApp).
+
+### AgentOS: Vendedor, política e aprovação de mensagens — fase 3b (10/10/2026)
+- **Vendedor** (`src/agents/seller/`, `src/services/outreach/`): escolhe leads dos agentes
+  (score mínimo, celular brasileiro, fora da lista de bloqueio), confirma o WhatsApp
+  do número pelo gateway (`recipient`, com teto diário de consultas), escreve a
+  mensagem e a manda para **aprovação** (edição permitida; o aviso "responda PARE"
+  é recolocado se for apagado). Nome de contato inventado pelas fontes
+  automáticas nunca entra na mensagem.
+- **Ciclos de envio** (`outreach_cycles`, migração `0007_vendedor.sql`, já no
+  `setup-producao.sql`): um ativo por lead, reivindicação atômica, no máximo 3
+  toques espaçados. Política no CRM: janela (seg–sex 9–18h, São Paulo), teto
+  diário com aquecimento 10/20/30→máximo, intervalo aleatório, bloqueio.
+- **Esperar não é falhar:** desconectado, modo pausado, fora da janela, teto ou
+  intervalo adiam sem gastar tentativa; mensagem aprovada que passou do dia da
+  etapa vira obsoleta e não sai. **Timeout vira "incerto" e nunca é reenviado**;
+  um evento de entrega posterior o resolve.
+- **Gateway só envia com autorização assinada pelo CRM** (HMAC preso a sessão,
+  número, texto, referência e 2 min), com idempotência própria. Degraus:
+  simulado → teste restrito (`WHATSAPP_ALLOWED_RECIPIENTS`) → real. A tela mostra
+  o degrau atual e o gateway ganhou `GATEWAY_SIMULATE=1` (socket falso, só para desenvolvimento).
+- Tela `/agentes/vendedor`: conexão, números do dia, fila, mensagens enviadas
+  (enviada → entregue → lida), política editável, lista de bloqueio, tarefas e
+  registro. Aprovação em `/agentes/aprovacao` com texto exato e edição.
+- Verificado de verdade, ponta a ponta no navegador, com o gateway em modo
+  simulado + teste restrito: 6 mensagens chegaram para aprovação, uma foi
+  editada e aprovada, o gateway recusou-a enquanto o número não estava na lista
+  (ficou "Agendada") e a enviou depois que entrou; o histórico foi enviada →
+  entregue → lida e o texto enviado trazia a edição e o aviso de saída. A política
+  inválida é recusada e a válida salva; sem rolagem lateral no celular.
+- Testes: `npm test` (308), `tsc`, `lint` e `build` limpos.
+- **Não verificado:** envio por um número de verdade (o gateway simulado troca o
+  WhatsApp por um socket falso; falta o seu número dedicado) e a migração `0007`
+  no Supabase. Os leads de teste e o gateway simulado foram desfeitos: `.data/db.json`
+  voltou ao estado anterior.
+- **Para ativar de verdade (passo 2):** conecte o número dedicado, ponha o seu
+  número em `WHATSAPP_ALLOWED_RECIPIENTS` e `WHATSAPP_GATEWAY_DRY_RUN=0` no
+  `.env.gateway`, reinicie o gateway e aprove uma mensagem de um lead de teste
+  com o seu telefone. O passo 3 (real) é seu: ver `docs/WHATSAPP_LOCAL.md`.
+- **Próximas fases:** 3c (recebimento, classificação, reuniões, notificação ao seu WhatsApp).
+
+### AgentOS: conversa, reuniões e aviso ao dono — fase 3c (10/10/2026)
+- **Recebimento:** o gateway entrega as respostas dos leads (padrão ligado) e o que **você** escreve
+  pelo celular. O CRM liga ao lead pelo telefone (com ou sem o nono dígito), grava na conversa
+  que já existia (`/conversas`), muda o lead para "respondeu", avisa no sino e dispara
+  `lead.replied`. Número que não é de lead é ignorado, sem guardar o texto. Duplicata (mesmo
+  evento ou mesma mensagem do WhatsApp com outro id de evento) não repete nada.
+- **Pedido para parar:** regra fixa, antes de qualquer modelo (também com o agente pausado):
+  bloqueia o número, encerra o lead e cancela follow-ups e pedidos pendentes. Sem resposta.
+- **Você escreveu pelo celular:** a conversa passa a ser sua (`conversation_state`), o que o
+  agente tinha a caminho é cancelado e nem um ciclo já aprovado sai depois disso. O eco das
+  mensagens do próprio gateway é reconhecido (no gateway e no CRM) e não conta como você.
+  "Assumir" e "Devolver ao agente" no painel fazem o mesmo à mão.
+- **Classificação e resposta** (`services/conversation/`): usa o classificador de respostas
+  que já existia (11 categorias) com o texto do lead isolado em `<cliente>` e mais barreiras;
+  com `ANTHROPIC_API_KEY` (ou OpenAI) o modelo escolhe a categoria, sem chave valem as regras.
+  Interesse, preço, proposta ou reunião → registra o interesse e propõe **dois horários** dentro
+  da disponibilidade; o horário que o lead escolher marca a reunião (`meetings`, tarefa no CRM,
+  lead em "reunião", `lead.interested` e `meeting.scheduled`). Retorno futuro, sem prioridade
+  e "já tenho fornecedor" têm resposta curta; sem interesse encerra sem responder. Mídia,
+  mensagem vaga, horário que não ficou claro, dúvida fora do roteiro, lead que o Vendedor nunca
+  abordou ou frase proibida do perfil passam para **você** ("Precisam de você" + sino).
+- **Segurança do texto do lead:** ele é dado. A resposta sai de modelos fixos (sem link, preço
+  nem promessa), só para o telefone que o Vendedor já confirmou, e as barreiras valem também
+  para o que você editar. Resposta parada há mais de 2 dias ou com horários vencidos não sai.
+- **Aviso ao seu WhatsApp:** ao marcar a reunião, `owner_notices` envia pelo gateway (mesma
+  autorização, idempotência e regra de "sem confirmação não repete") lead, dia/hora e o que o
+  lead disse; o sino avisa sempre. Falha ou desconexão ficam visíveis na própria reunião.
+- Migração `0008_conversa.sql` (já no `setup-producao.sql` e no verificador): `conversation_state`,
+  `meetings`, `owner_notices`, e `kind` nos ciclos (abordagem x resposta, toque 0).
+- Tela `/agentes/vendedor`: "Precisam de você", Conversas (com quem conduz cada uma), Reuniões
+  (com o estado do aviso) e o formulário de disponibilidade e do seu WhatsApp. Respostas aparecem
+  em `/agentes/aprovacao` com texto exato e edição.
+- Verificado de verdade, ponta a ponta no navegador, com o gateway simulado (rota de mensagem
+  simulada só em desenvolvimento) + teste restrito: abordagem aprovada e enviada; resposta
+  "Gostei! Como funciona isso?" virou proposta de dois horários (aprovada e enviada); "Pode ser o
+  segundo" marcou a reunião, criou a tarefa, e o aviso saiu para o número do dono; "PARE" bloqueou
+  o outro lead sem resposta; uma mensagem "do celular" tirou a conversa do agente e retirou a
+  confirmação pendente; sem rolagem lateral no celular.
+- Testes: `npm test` (355), `tsc`, `lint` e `build` limpos.
+- **Não verificado:** o recebimento de mensagens com um WhatsApp de verdade (o gateway simulado
+  injeta pelo mesmo caminho, mas o Baileys real não foi exercitado; em particular o eco de envio
+  e o endereço `@lid` só estão cobertos por teste), o classificador com um modelo de verdade
+  (sem chave, só as regras foram exercitadas) e a migração `0008` no Supabase. Os leads e o
+  gateway simulados foram desfeitos: `.data/db.json` voltou ao estado anterior.
+- **Limites desta fase:** não há Google Calendar (a disponibilidade é a configurada) e nem dossiê
+  (Agente 3), então o aviso não leva link de dossiê; a tela /conversas ainda não envia pelo
+  WhatsApp (só o Vendedor envia).
+- **Próximas fases:** F2 (Agente 3, dossiê), F4 (Agente 5, sites) e F5 (anúncios e Instagram).
+
+### AgentOS: Analista de Presença Digital (dossiê) — fase 2 (11/10/2026)
+- **Agente 3** (`src/agents/presence/`, `src/services/presence/`): monta, para cada lead dos agentes (do maior
+  score ao menor, com teto por dia e no máximo 2 em montagem), um dossiê só com conteúdo público.
+  Entra na fila direto (só lê e só escreve o dossiê). Tela `/agentes/presence` e aba "Dossiê" no lead.
+- **Fontes, cada uma com estado** (concluída, parcial, bloqueada, pendente): site atual, ficha do Google
+  Maps (dados do próprio cadastro do Places), Instagram, Facebook, link na bio, YouTube, Mercado Livre e OLX.
+  Cliente HTTP anti-SSRF (DNS resolvido, IP conferido, conexão fixada, cada redirecionamento revalidado);
+  login, 403, 429 e desafio anti-robô viram **"bloqueada"** e baixam a confiança — nada é contornado.
+  Mercado Livre e OLX só pelos links que o próprio site publica (procurar por nome daria vendedor errado).
+- **Toda afirmação tem evidência:** o dossiê só aceita afirmação com trecho de origem; `validateDossier`
+  confere o conjunto e um dossiê que quebra a regra nem é gravado. Lead de demonstração: nada é consultado.
+- **Nota do site por rubrica** (seis critérios, 0 a 5, cada um com o dado medido): responsividade,
+  hierarquia, clareza da oferta, prova social, chamada para ação e atualização técnica. O resultado
+  **atualiza `website_quality`** (só com veredito completo; site barrado não muda nada) e os contatos que
+  o lead não tinha, sempre com o rastro no histórico. Domínio à venda, "em construção" e construtor
+  gratuito são "ruim"; sem a tag viewport nunca passa de "desatualizado".
+- **Avaliação visual (opcional, desligada):** captura desktop e celular com o Chrome/Edge instalado e envia
+  a um modelo com visão (Anthropic) uma nota por critério. A resposta é validada, limitada a 0–5 e a
+  observação é guardada como opinião do modelo. As imagens saem do computador: por isso vem desligada.
+- **Vendedor:** passa a exigir dossiê (configurável; vale só enquanto o Agente 3 está ligado — pausá-lo libera o
+  Vendedor) e a mensagem de abordagem fala do **problema que o dossiê comprovou** em vez da análise genérica.
+- Texto de páginas é dado, nunca instrução: teste de injeção cobre uma página que manda classificar o site
+  como "bom" e enviar dados a um número — a nota não muda.
+- Migração `0009_dossie.sql` (já no `setup-producao.sql` e no verificador), evento `lead.dossier_ready`.
+- Verificado de verdade: busca real a um site público (nota e motivos), Instagram real devolvendo "bloqueada",
+  bloqueio de 127.0.0.1 e do endereço de metadados, captura real desktop e celular com o Chrome instalado
+  (PNG válido), e no navegador: dossiês montados pelo runner, aba "Dossiê" do lead, qualidade do site
+  atualizada com rastro, sem rolagem lateral no celular.
+- Testes: `npm test` (387), `tsc`, `lint` e `build` limpos.
+- **Não verificado:** a leitura visual pelo modelo (não há chave da Anthropic neste ambiente: só a captura foi
+  exercitada, e a resposta do modelo por teste com simulação), Facebook/YouTube/Mercado Livre/OLX reais, e a
+  migração `0009` no Supabase. Os leads de teste foram removidos: `.data/db.json` voltou ao estado anterior.
+- **Limites:** sem transcrição de vídeo, sem ofertas detalhadas, imagens e tom de voz (a F4 precisa deles e os
+  extrai do próprio site), e sem Playwright — só o navegador instalado, em modo headless.
+
+### AgentOS: Programador de Sites (prévia) — fase 4 (11/10/2026)
+- **A porta** (`src/lib/site-gate.ts`, função pura testada): a construção só começa com o lead em "interessado" ou
+  "reunião", **interesse explícito registrado** (a mensagem do lead que o comprova, gravada pela fase 3c), **reunião
+  agendada com data futura**, **tempo hábil** (pronta até reunião − 2 h; sem tempo, avisa em vez de entregar pela
+  metade) e **dossiê válido e real** com o mínimo (nome e um contato). `enqueueSiteBuild` **lança erro** se qualquer
+  uma faltar, e a porta é conferida de novo quando a tarefa começa.
+- **Entrada só o dossiê** (Agente 3, que agora guarda um `profile` com os campos comprovados e a origem de cada
+  um). O gerador (`lib/site-generate.ts`) é determinístico, não um modelo: cada texto da página é um valor do perfil ou
+  uma palavra do vocabulário fixo da interface. Página estática (HTML + CSS inline), **sem script, sem imagem e sem
+  recurso externo**; seção sem dado não existe; nada de depoimento, preço ou foto de banco. Loja virtual fica de fora:
+  a v1 é vitrine com pedido pelo WhatsApp.
+- **Verificação independente** (`lib/site-verify.ts` + navegador): nada de texto fora do dossiê (palavra a palavra),
+  links só os do perfil, contatos idênticos, noindex, sem recurso externo; e no **Chrome/Edge headless**: erro de
+  console, rolagem lateral no celular, âncoras quebradas e capturas de tela desktop e celular. Qualquer falha e a
+  prévia não é entregue (arquivos apagados). Sem navegador a prévia também não sai (configurável).
+- **Prévia** em `/previa/<token>` (192 bits aleatórios, pública para o proxy porque quem recebe não tem conta):
+  `X-Robots-Tag: noindex`, CSP sem script, `no-store`, expira depois da reunião (7 dias) e pode ser tirada do ar. Só
+  uma prévia viva por lead. Capturas pelo painel autenticado. Aviso no sino e no seu WhatsApp (`owner_notices`,
+  `kind=previa`; o endereço completo só vai se houver `PUBLIC_BASE_URL`).
+- Tela `/agentes/site-builder` (prévias, reuniões esperando com o motivo da porta fechada, configuração) e cartão da
+  prévia na aba Dossiê do lead. Migração `0010_sites.sql` (já no `setup-producao.sql` e no verificador).
+- Verificado de verdade: do dossiê à prévia no runner com o Chrome instalado (12 de 12 verificações), endereço servido
+  com os cabeçalhos certos, token errado e fora do formato dando 404, cartão no lead, e a prévia aberta no navegador.
+- Testes: `npm test` (425), `tsc`, `lint` e `build` limpos.
+- **Desvios da especificação:** o gerador é por modelos, não Claude Code com Skills/Playwright/Figma (não dá para
+  verificar uma construção por modelo de linguagem sem uma chave, e a verificação aqui é a mesma que valeria para
+  ela); a verificação de navegador usa o Chrome/Edge instalados em modo headless, não o Playwright MCP; imagens do
+  cliente não são usadas (a prévia não tem imagem nenhuma); não há deploy de prévia em hospedagem — o endereço vive no
+  seu computador (para mostrar fora dele, aponte `PUBLIC_BASE_URL` para um túnel seu); publicar de verdade
+  exigiria consentimento e não existe.
+- **Não verificado:** a migração `0010` no Supabase e o comportamento com sites reais de clientes (o teste ao vivo
+  usou um site público de exemplo, com pouco conteúdo).
+
+### AgentOS: Mídias Sociais e Gestor de Tráfego — fase 5 (11/10/2026)
+- **A regra, em código e provada por teste:** nenhuma publicação nem alteração de gasto sem clique. As ferramentas
+  que mexem fora do CRM (`instagram.publish_media`, criar/ativar/pausar campanha, ajustar orçamento) estão em
+  `HUMAN_ONLY_TOOLS`, **fora da lista de qualquer agente** (`src/agents/tools.ts`); um teste confere que (a) nenhum
+  agente as recebe, (b) o código dos agentes não importa nem cita as funções de publicar/ativar/pausar/ajustar, e
+  (c) o módulo de publicar (`instagram-publisher.ts`) só é importado pelo serviço que a ação do botão chama. Outro
+  teste roda os dois agentes em modo **automático**, com o Instagram configurado, e prova que não houve nenhuma
+  chamada de escrita à API e que nenhuma campanha foi ativada.
+- **Agente 7 — Mídias Sociais** (`src/agents/social/`): uma proposta por dia (pauta, legenda e ideia de imagem) só
+  com fatos do perfil da empresa, sem repetir pauta recente (olha também os posts publicados quando o Instagram
+  está ligado). Legenda passa por barreiras (sem link, sem promessa, sem frase proibida, tamanho, hashtags). Estados:
+  rascunho → pendente → aprovado → publicando → publicado | falhou, mais recusado e expirado. **"Aprovar e
+  publicar"** (`approveAndPublish`) é a única passagem que publica: reivindica o post de forma **atômica** (dois
+  cliques ou duas abas publicam uma vez só), confere legenda e imagem, e só então chama a API Graph. Falha definitiva
+  pode ser reaberta para um novo clique; **sem confirmação vira "incerta"** (nunca se repete sozinha: conferir no
+  Instagram ou marcar que não saiu). Editar legenda e imagem antes de aprovar. Aprovar um post pela fila genérica
+  de aprovação **não** publica.
+- **Agente 6 — Gestor de Tráfego** (`src/agents/traffic/`): um rascunho de campanha por semana, e uma revisão diária
+  dos relatórios que **só propõe** pausar o que gasta sem converter ou tudo o que passou do teto (e avisa no sino).
+  Toda campanha nasce rascunho em `approvals`; **aprovar o rascunho não gasta nada, ativar é outro clique**. Ativar
+  e subir orçamento conferem os **tetos diário e mensal** no servidor (soma dos orçamentos ativos; gasto do mês +
+  previsto até o fim do mês) e são atômicos. Dinheiro em centavos. Provedor **manual**: você cria a campanha na
+  plataforma e o CRM guarda o controle, os tetos e os relatórios (lançados à mão).
+- Telas `/agentes/social-media` (posts, edição, imagem, conferência de incertos, configuração e passo a passo do
+  Instagram) e `/agentes/traffic-manager` (gasto e tetos, campanhas, relatório do dia, tetos configuráveis).
+  `scripts/set-instagram-token.mjs` grava ID e token sem expor o token. Migração `0011_social_trafego.sql`
+  (já no `setup-producao.sql` e no verificador).
+- Testes: `npm test` (461), `tsc`, `lint` e `build` limpos.
+- **Desvios da especificação:** o Instagram é falado direto pela API Graph (HTTP, com o token no cabeçalho), não por
+  um servidor MCP Python (`ig-mcp`) — a garantia é a mesma e não há processo extra; o AdKit é um serviço pago e
+  hospedado cujo protocolo não dá para verificar daqui, então o Agente 6 entrega o núcleo (rascunhos, aprovação,
+  tetos, relatórios) com o provedor manual, e as plataformas entram atrás da mesma interface quando houver conta;
+  a imagem do post é um endereço público que VOCÊ informa (o agente sugere a ideia, não gera imagem).
+- **Não verificado:** publicar de verdade no Instagram (não há conta Business nem token neste ambiente: o cliente HTTP
+  e os dois passos da API foram verificados contra simulações), a leitura real do perfil e dos posts, e a migração
+  `0011` no Supabase.
+
 ## Pela metade — Supabase
 
 Objetivo: em produção o banco vive na memória da instância, então leads

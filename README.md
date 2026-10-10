@@ -233,6 +233,83 @@ ausência de credenciais. `npm run typecheck` e `npm run lint` completam.
 identifica o titular por cookie sem senha) e rodar a migração 0003 — as
 políticas de RLS e de Storage só valem com Supabase Auth.
 
+## Agentes (AgentOS)
+
+Agentes que operam o funil sozinhos, observados pelo dashboard em **/agentes**.
+Hoje há dois; o plano completo (dossiê, vendedor no WhatsApp, programador de
+sites, tráfego e Instagram) está em [`PROMPT_AGENTOS.md`](PROMPT_AGENTOS.md).
+
+| Agente | O que faz |
+| --- | --- |
+| **Analista de Nicho** | Para cada nicho × cidade, pede empresas ao Google Maps, mede quantas não têm site, visita uma amostra de sites para ver se são fracos e dá uma nota 0–100 com fatores publicados ("por que 89 pontos?"). Você fixa ou bane nichos. |
+| **Prospectador** | Pega os nichos mais bem ranqueados e cadastra como leads as empresas **sem site ou com site fraco** (filtro `weakWebsite`; "Sem site" e "Site ruim" juntos se excluem). Reaproveita o job da tela de Prospectar. |
+
+**Como funciona**
+
+- O **runner** sobe junto com o servidor (`src/instrumentation.ts`) e vive no
+  mesmo processo, porque o estado do CRM (snapshot e cache de leads) é por
+  processo: um segundo processo sobrescreveria o do servidor. Por isso os
+  agentes rodam **no seu computador** (`npm run build && npm start`), não na
+  Vercel. `AGENTS_RUNNER=off` desliga só o runner.
+- **Fila durável** (`agent_tasks`): lease, tentativas com backoff, 429 sem
+  queimar tentativa, tarefa interrompida é retomada ao reiniciar, e uma que
+  derruba o servidor repetidamente acaba falhando em vez de repetir para sempre.
+- **Modos por agente:** *Pausado* (nada roda), *Em aprovação* (o que o agente
+  decide iniciar vira um pedido em /agentes/aprovacao e só roda após o seu
+  clique; nasce assim) e *Automático*. Há um **interruptor geral**. "Executar
+  agora" por uma pessoa já conta como aprovação.
+- **Tetos diários** de requisições ao Google e de leads (a cota é paga). Ao
+  estourar, a tarefa espera o dia seguinte.
+- O dashboard só mostra o que foi contado no banco: sem dado, estado vazio.
+- Permissões: configurar, mudar modo, aprovar e fixar/banir exigem owner/admin;
+  executar agora e cancelar, qualquer perfil de escrita.
+
+**Dossiê (Agente 3):** o Analista de Presença Digital monta, para cada lead dos agentes, um
+dossiê só com conteúdo público: site atual (nota por seis critérios, com o dado medido em cada
+um), ficha do Google Maps, Instagram, Facebook, link na bio, YouTube, Mercado Livre e OLX. Cada
+fonte tem o seu estado (concluída, parcial, bloqueada, pendente) e **toda afirmação carrega a
+evidência** de onde veio; fonte que pede login ou barra o acesso aparece como bloqueada e baixa a
+confiança, nunca é contornada. O resultado atualiza a qualidade do site do lead (com o rastro no
+histórico) e a abordagem do Vendedor passa a falar do problema comprovado. Tela em
+**/agentes/presence** e aba “Dossiê” em cada lead. A avaliação visual (capturas lidas por um
+modelo) é opcional e vem desligada.
+
+**Prévia do site (Agente 5):** quando um lead demonstra interesse de forma explícita e marca reunião, o
+Programador de Sites monta uma prévia do site **só com o que o dossiê comprova** (sem imagem, depoimento,
+preço nem endereço inventado), a verifica no navegador (erro de console, rolagem lateral no celular, capturas)
+e a deixa num endereço não adivinhável, fora dos buscadores, antes da reunião. Sem interesse registrado e
+reunião futura, nenhuma construção começa: é uma regra de código testada. Tela em **/agentes/site-builder**.
+
+**Mídias Sociais e Tráfego (Agentes 7 e 6):** o agente de Mídias Sociais propõe, uma vez por dia, um post
+para o Instagram (pauta, legenda e a ideia da imagem) a partir do perfil da empresa; o de Tráfego propõe
+rascunhos de campanha e sugere pausar o que gasta sem resultado. **Nada sai sem o seu clique:** publicar é
+"Aprovar e publicar" no próprio post, e uma campanha nasce rascunho — aprovar o rascunho não gasta nada, ativar
+é outro clique, conferido contra os **tetos de gasto diário e mensal** no servidor. As ferramentas que mexem
+fora do CRM (publicar, ativar, pausar, ajustar orçamento) não estão na lista de nenhum agente, e testes provam
+isso. Telas em **/agentes/social-media** e **/agentes/traffic-manager**; para ligar o Instagram use
+`node scripts/set-instagram-token.mjs`.
+
+**WhatsApp (gateway):** o número dedicado à prospecção é conectado por um
+gateway à parte (`npm run gateway`), que guarda a sessão num SQLite próprio e
+entrega o estado da conexão ao CRM por webhook assinado, com caixa de saída
+durável. Tela em **/agentes/vendedor**: conexão, fila de abordagem, mensagens
+enviadas, política de envio e lista de bloqueio. O **Vendedor** confirma que o
+número tem WhatsApp, escreve a primeira mensagem e a manda para **aprovação**
+(`/agentes/aprovacao`, com edição); só então ela entra na fila de envio, que
+respeita janela, teto diário, intervalo, máximo de 3 toques e aviso de saída. O
+envio real é ativado em degraus (simulado → só o seu número → real). Responder
+Quando o lead responde, o Vendedor trata o pedido para parar (bloqueio imediato),
+classifica, propõe dois horários, marca a reunião e avisa no sino e no seu WhatsApp;
+o que não sabe tratar, e tudo o que você escrever pelo celular, passa para você. Guia
+completo, riscos e operação em [`docs/WHATSAPP_LOCAL.md`](docs/WHATSAPP_LOCAL.md).
+
+Sem `GOOGLE_PLACES_API_KEY` os agentes usam o diretório de demonstração e tudo
+que produzem é marcado como **dados de demonstração**.
+
+**Supabase:** rode `database/migrations/0005_agentes.sql`, `0006_whatsapp.sql`, `0007_vendedor.sql`, `0008_conversa.sql`, `0009_dossie.sql`, `0010_sites.sql` e `0011_social_trafego.sql` (já estão em
+`database/setup-producao.sql`) e confira com `node scripts/verificar-supabase.mjs`.
+Sem Supabase tudo funciona no `.data/db.json`.
+
 ## Roadmap
 
 - **Fase 2:** WhatsApp Business, Gmail/Calendar, cadências automatizadas com opt-out/LGPD, relatórios avançados.

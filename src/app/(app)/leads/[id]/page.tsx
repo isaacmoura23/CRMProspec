@@ -22,6 +22,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScoreBadge } from "@/components/score-badge";
 import { LeadHeaderActions } from "@/features/leads/lead-actions";
+import { DossierView } from "@/features/presence/dossier-view";
+import { getDossier } from "@/services/presence/build";
+import { LeadSiteCard } from "@/features/sites/lead-site-card";
+import { evaluateGate } from "@/services/sites/build";
+import { agentRepo } from "@/services/agents/repository";
+import { getCurrentUser } from "@/lib/auth";
+import { canWrite } from "@/lib/permissions";
 import { MessageGenerator } from "@/features/leads/message-generator";
 import { NotesPanel } from "@/features/leads/notes-panel";
 import { buildNextAction } from "@/features/leads/next-action";
@@ -48,11 +55,17 @@ const ACTIVITY_DOT: Record<string, string> = {
   perda: "bg-danger",
 };
 
-export default async function LeadPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function LeadPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ tab?: string }> }) {
   const { id } = await params;
+  const { tab } = await searchParams;
   const db = getDb();
   const lead = db.leads.find((l) => l.id === id);
   if (!lead) notFound();
+  const user = await getCurrentUser();
+  const dossier = await getDossier(id);
+  const siteGate = (await evaluateGate(id)).gate;
+  const siteBuild = (await agentRepo().list("site_builds", { where: { lead_id: id }, orderBy: "created_at", desc: true, limit: 1 }))[0] ?? null;
+  const previewPath = siteBuild && siteBuild.status === "pronto" && siteBuild.expires_at && siteBuild.expires_at > new Date().toISOString() ? `/previa/${siteBuild.token}` : null;
 
   const analysis = db.lead_analysis.find((a) => a.lead_id === id);
   const scoreHistory = db.lead_score_history
@@ -110,10 +123,11 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
         <LeadHeaderActions lead={lead} users={db.users} />
       </div>
 
-      <Tabs defaultValue="resumo">
+      <Tabs defaultValue={tab === "dossie" ? "dossie" : "resumo"}>
         <TabsList>
           <TabsTrigger value="resumo">Resumo</TabsTrigger>
           <TabsTrigger value="mensagens">Abordagens IA</TabsTrigger>
+          <TabsTrigger value="dossie">Dossiê {dossier && "✓"}</TabsTrigger>
           <TabsTrigger value="timeline">Timeline</TabsTrigger>
           <TabsTrigger value="notas">Notas {notes.length > 0 && `(${notes.length})`}</TabsTrigger>
         </TabsList>
@@ -315,6 +329,32 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
         {/* ---------------- MENSAGENS ---------------- */}
         <TabsContent value="mensagens">
           <MessageGenerator leadId={lead.id} hasAnalysis={Boolean(analysis)} savedGenerations={generations} />
+        </TabsContent>
+
+        {/* ---------------- DOSSIÊ ---------------- */}
+        <TabsContent value="dossie">
+          <Card>
+            <CardContent className="p-5">
+              <div className="mb-5">
+                <LeadSiteCard
+                  previewPath={previewPath}
+                  status={siteBuild?.status ?? null}
+                  readyAt={siteBuild?.ready_at ?? null}
+                  expiresAt={siteBuild?.expires_at ?? null}
+                  gateReason={siteGate.ok ? null : siteGate.reason}
+                  canRun={canWrite(user.role)}
+                  leadId={id}
+                />
+              </div>
+              {dossier ? (
+                <DossierView dossier={dossier} />
+              ) : (
+                <p className="py-6 text-center text-[13px] text-muted-foreground">
+                  Ainda não há dossiê deste lead. O Analista de Presença Digital monta o dossiê dos leads dos agentes; você também pode pedir um em Agentes › Analista de Presença Digital.
+                </p>
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
 
         {/* ---------------- TIMELINE ---------------- */}

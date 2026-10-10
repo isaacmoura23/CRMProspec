@@ -161,10 +161,16 @@ export class DirectoryProvider implements LeadProvider {
       const f = params.filters;
 
       // atributos gerados com probabilidades realistas, viesados pelos filtros
-      const hasWebsite = f.noWebsite ? false : f.hasWebsite || f.badWebsite ? true : chance(niche.websiteRate);
+      const hasWebsite = f.noWebsite
+        ? false
+        : f.hasWebsite || f.badWebsite
+          ? true
+          : f.weakWebsite
+            ? chance(0.5)
+            : chance(niche.websiteRate);
       const websiteQuality: RawLead["website_quality"] = !hasWebsite
         ? "nenhum"
-        : f.badWebsite
+        : f.badWebsite || f.weakWebsite
           ? pick(["ruim", "desatualizado"])
           : pick(["bom", "desatualizado", "ruim", "bom", "desatualizado"]);
       const hasInstagram = f.hasInstagram ? true : chance(0.75);

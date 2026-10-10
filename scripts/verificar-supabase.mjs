@@ -57,6 +57,26 @@ const TABELAS = [
   ["career_queue", "0003_carreira.sql"],
   ["app_users", "0004_auth.sql"],
   ["app_invites", "0004_auth.sql"],
+  ["agent_settings", "0005_agentes.sql"],
+  ["agent_tasks", "0005_agentes.sql"],
+  ["agent_events", "0005_agentes.sql"],
+  ["agent_heartbeats", "0005_agentes.sql"],
+  ["niche_targets", "0005_agentes.sql"],
+  ["approvals", "0005_agentes.sql"],
+  ["spend_ledger", "0005_agentes.sql"],
+  ["whatsapp_link", "0006_whatsapp.sql"],
+  ["whatsapp_receipts", "0006_whatsapp.sql"],
+  ["outreach_cycles", "0007_vendedor.sql"],
+  ["outreach_messages", "0007_vendedor.sql"],
+  ["channel_blocklist", "0007_vendedor.sql"],
+  ["conversation_state", "0008_conversa.sql"],
+  ["meetings", "0008_conversa.sql"],
+  ["owner_notices", "0008_conversa.sql"],
+  ["lead_dossiers", "0009_dossie.sql"],
+  ["site_builds", "0010_sites.sql"],
+  ["social_posts", "0011_social_trafego.sql"],
+  ["ad_campaigns", "0011_social_trafego.sql"],
+  ["ad_reports", "0011_social_trafego.sql"],
 ];
 const pendentes = new Set();
 for (const [tabela, migracao] of TABELAS) {
@@ -69,7 +89,7 @@ for (const [tabela, migracao] of TABELAS) {
 }
 if (pendentes.size) {
   console.log(`\n  Rode no SQL Editor do Supabase, nesta ordem: ${[...pendentes].join(", ")}`);
-  console.log("  (ou cole database/setup-producao.sql, que já traz as três na ordem)");
+  console.log("  (ou cole database/setup-producao.sql, que já traz todas na ordem)");
 }
 
 console.log("\nArmazenamento");

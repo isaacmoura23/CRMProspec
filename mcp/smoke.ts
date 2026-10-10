@@ -20,6 +20,7 @@ const CHAMADAS: Array<{ nome: string; args: Record<string, unknown> }> = [
   { nome: "analise_amostrar", args: { quantidade: 2 } },
   { nome: "email_testar_extracao", args: { html: '<a href="mailto:contato@imob.com.br">x</a> por agencia@outra.com.br', site: "https://imob.com.br" } },
   { nome: "carreira_estado", args: {} },
+  { nome: "agentes_estado", args: {} },
 ];
 
 async function main() {

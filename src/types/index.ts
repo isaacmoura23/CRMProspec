@@ -4,6 +4,7 @@
  * ============================================================ */
 
 import type { CareerData } from "@/types/career";
+import type { AgentData } from "@/types/agents";
 
 export type Role = "owner" | "admin" | "sdr" | "vendedor" | "viewer";
 
@@ -274,6 +275,10 @@ export interface Message {
   content: string;
   classification: string | null;
   created_at: string;
+  /** Id da mensagem no WhatsApp: impede gravar duas vezes a mesma mensagem reentregue. */
+  provider_message_id?: string;
+  /** Quem escreveu: o agente, você pelo celular ou pelo painel, ou o lead. */
+  author?: "lead" | "agente" | "humano";
 }
 
 export type ProposalStatus =
@@ -382,6 +387,8 @@ export interface SearchParams {
     noWebsite?: boolean;
     hasWebsite?: boolean;
     badWebsite?: boolean;
+    /** Sem site OU com site ruim/desatualizado (“Sem site” e “Site ruim” se excluem). */
+    weakWebsite?: boolean;
     activeBusiness?: boolean;
     hasReviews?: boolean;
     strongSocial?: boolean;
@@ -479,6 +486,8 @@ export interface Database {
   seen_source_ids?: string[];
   /** Módulo Carreira (currículos, vagas, candidaturas, fila). Criado sob demanda. */
   career?: CareerData;
+  /** AgentOS (fila, eventos, nichos, aprovações). Criado sob demanda. */
+  agents?: AgentData;
   settings: {
     default_niche: string;
     default_country: string;

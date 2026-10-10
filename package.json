@@ -10,7 +10,8 @@
     "test": "node tests/run.cjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "mcp": "tsx --require ./mcp/runtime.cjs ./mcp/server.ts",
-    "mcp:smoke": "tsx ./mcp/smoke.ts"
+    "mcp:smoke": "tsx ./mcp/smoke.ts",
+    "gateway": "tsx gateway/index.mts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",
@@ -30,11 +31,14 @@
     "@radix-ui/react-tooltip": "^1.2.16",
     "@supabase/ssr": "^0.12.4",
     "@supabase/supabase-js": "^2.112.3",
+    "@whiskeysockets/baileys": "^7.0.0-rc14",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^1.33.0",
     "next": "16.3.1",
     "pdf-lib": "^1.17.1",
+    "pino": "^10.4.0",
+    "qrcode": "^1.5.4",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "tailwind-merge": "^3.6.0",
@@ -44,6 +48,7 @@
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",

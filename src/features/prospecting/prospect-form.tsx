@@ -59,6 +59,7 @@ const CHARACTERISTICS: Array<{ key: string; label: string; hint: string }> = [
   { key: "noWebsite", label: "Sem site", hint: "Oportunidade clássica, mas rara em alguns nichos (imobiliárias, clínicas)." },
   { key: "hasWebsite", label: "Possui site", hint: "Não combina com “Sem site”." },
   { key: "badWebsite", label: "Site potencialmente ruim", hint: "Site que não abre bem no celular ou parece antigo." },
+  { key: "weakWebsite", label: "Sem site ou site fraco", hint: "O melhor alvo para vender site: junta “Sem site” e “Site ruim” num só critério." },
   { key: "activeBusiness", label: "Empresa ativa", hint: "Exclui as que o Google marca como fechadas." },
   { key: "hasReviews", label: "Empresa com avaliações", hint: "Tem ao menos uma avaliação no Google." },
   { key: "strongSocial", label: "Presença forte em redes sociais", hint: "Instagram ativo — depende de achar o perfil pelo site." },

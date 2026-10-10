@@ -44,6 +44,7 @@ npm run mcp
 | `analise_amostrar` | Mostra a análise gerada para alguns leads, lado a lado | não |
 | `email_testar_extracao` | Aplica `pickEmail` num HTML e diz qual endereço seria gravado | não |
 | `carreira_estado` | Currículos, vagas, candidaturas e a fila de jobs do módulo Carreira | não |
+| `agentes_estado` | Fila de tarefas dos agentes, nichos ranqueados, pedidos de aprovação e últimos eventos (retrato do último salvamento do `.data/db.json`) | não |
 
 ## Como funciona por dentro
 

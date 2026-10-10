@@ -1,0 +1,40 @@
+import "server-only";
+import { nicheAnalyst, registerNicheAnalystHandlers } from "@/agents/niche/agent";
+import { presence, registerPresenceHandlers } from "@/agents/presence/agent";
+import { prospector, registerProspectorHandlers } from "@/agents/prospector/agent";
+import { registerSiteBuilderHandlers, siteBuilder } from "@/agents/site-builder/agent";
+import { registerSellerHandlers, seller } from "@/agents/seller/agent";
+import { registerSocialHandlers, socialMedia } from "@/agents/social/agent";
+import { registerTrafficHandlers, trafficManager } from "@/agents/traffic/agent";
+import type { AgentDefinition } from "@/agents/types";
+import { isAgentId, type AgentId } from "@/types/agents";
+
+/**
+ * Registro dos agentes, no estilo de `providers/registry.ts`. Um agente novo
+ * entra aqui (definição + handlers) e na lista de `AGENT_IDS`.
+ */
+export const AGENTS: AgentDefinition[] = [nicheAnalyst, prospector, presence, seller, siteBuilder, trafficManager, socialMedia];
+
+export function getAgent(id: string): AgentDefinition | undefined {
+  return isAgentId(id) ? AGENTS.find((a) => a.id === id) : undefined;
+}
+
+export function agentName(id: AgentId): string {
+  return AGENTS.find((a) => a.id === id)?.name ?? id;
+}
+
+type GlobalWithRegistered = typeof globalThis & { __agentsRegistered?: boolean };
+
+/** Idempotente: liga cada tipo de tarefa ao seu handler. */
+export function registerAgentHandlers() {
+  const g = globalThis as GlobalWithRegistered;
+  if (g.__agentsRegistered) return;
+  registerNicheAnalystHandlers();
+  registerProspectorHandlers();
+  registerPresenceHandlers();
+  registerSellerHandlers();
+  registerSiteBuilderHandlers();
+  registerTrafficHandlers();
+  registerSocialHandlers();
+  g.__agentsRegistered = true;
+}

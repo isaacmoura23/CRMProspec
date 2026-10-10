@@ -6,7 +6,7 @@
 -- novo não quebra nada.
 --
 -- A 0001_initial.sql NÃO entra aqui: é o schema completo de referência, para
--- quando todo o domínio migrar. As três abaixo não dependem dela.
+-- quando todo o domínio migrar. As cinco abaixo não dependem dela.
 
 
 -- ============================================================
@@ -662,3 +662,630 @@ create policy app_invites_admin on app_invites for all
     select 1 from app_users me
     where me.id = auth.uid() and me.role in ('owner','admin') and me.organization_id = app_invites.organization_id
   ));
+
+
+-- ============================================================
+-- 0005_agentes.sql — AgentOS: fila, log, nichos e aprovações dos agentes
+-- ============================================================
+
+-- Migração 0005 — AgentOS (fila, log, nichos e aprovações dos agentes).
+--
+-- Mesmas convenções da 0002–0004, pelo mesmo motivo (o resto do CRM ainda vive
+-- no snapshot da aplicação):
+--
+--   * `id` é text, no formato que o app gera (`atk_<hex>`, `nt_<nicho>_<cidade>`…);
+--   * `organization_id` é text e sem FK;
+--   * o servidor usa a service role, que ignora RLS. As políticas abaixo
+--     existem para que, se a anon key um dia chegar ao navegador, ninguém leia
+--     dado de outra organização — e só leitura: escrever é papel do servidor.
+--
+-- Rode no SQL Editor do Supabase, depois da 0004. É idempotente.
+
+-- ---------------------------------------------------------------------------
+-- Configuração (inclui a linha especial `global`, o interruptor geral)
+-- ---------------------------------------------------------------------------
+create table if not exists agent_settings (
+  id text not null,
+  organization_id text not null,
+  mode text not null default 'aprovacao' check (mode in ('pausado','aprovacao','automatico')),
+  config jsonb not null default '{}'::jsonb,
+  updated_at timestamptz not null default now(),
+  primary key (organization_id, id)
+);
+
+-- ---------------------------------------------------------------------------
+-- Fila durável (lease + tentativas), no molde de career_queue
+-- ---------------------------------------------------------------------------
+create table if not exists agent_tasks (
+  id text primary key,
+  organization_id text not null,
+  agent text not null,
+  kind text not null,
+  payload jsonb not null default '{}'::jsonb,
+  dedupe_key text,
+  status text not null default 'pendente' check (status in ('pendente','processando','concluido','falhou','cancelado')),
+  attempts int not null default 0,
+  max_attempts int not null default 3,
+  next_run_at timestamptz not null default now(),
+  locked_until timestamptz,
+  lock_owner text,
+  last_error text,
+  progress jsonb,
+  result jsonb,
+  created_by text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  finished_at timestamptz
+);
+create index if not exists agent_tasks_due_idx on agent_tasks (status, next_run_at, locked_until);
+create index if not exists agent_tasks_agent_idx on agent_tasks (organization_id, agent, created_at desc);
+-- A mesma tarefa não pode estar viva duas vezes (a corrida entre duas instâncias termina aqui).
+create unique index if not exists agent_tasks_dedupe_live_uq
+  on agent_tasks (organization_id, dedupe_key)
+  where dedupe_key is not null and status in ('pendente','processando');
+
+-- ---------------------------------------------------------------------------
+-- Log estruturado e batimento do runner
+-- ---------------------------------------------------------------------------
+create table if not exists agent_events (
+  id text primary key,
+  organization_id text not null,
+  agent text not null,
+  level text not null default 'info' check (level in ('info','warn','error')),
+  type text not null,
+  message text not null,
+  data jsonb,
+  task_id text,
+  created_at timestamptz not null default now()
+);
+create index if not exists agent_events_recent_idx on agent_events (organization_id, created_at desc);
+create index if not exists agent_events_agent_idx on agent_events (organization_id, agent, created_at desc);
+
+create table if not exists agent_heartbeats (
+  id text primary key,
+  organization_id text not null,
+  instance text not null,
+  started_at timestamptz not null,
+  beat_at timestamptz not null,
+  info jsonb
+);
+create index if not exists agent_heartbeats_beat_idx on agent_heartbeats (organization_id, beat_at desc);
+
+-- ---------------------------------------------------------------------------
+-- Agente 1: nichos ranqueados
+-- ---------------------------------------------------------------------------
+create table if not exists niche_targets (
+  id text primary key,
+  organization_id text not null,
+  niche text not null,
+  niche_label text not null,
+  city text not null,
+  state text,
+  country text not null default 'Brasil',
+  metrics jsonb not null default '{}'::jsonb,
+  score int not null default 0,
+  factors jsonb not null default '[]'::jsonb,
+  evidence jsonb not null default '[]'::jsonb,
+  source text not null,
+  status text not null default 'auto' check (status in ('auto','fixado','banido')),
+  analyzed_at timestamptz not null default now(),
+  valid_until timestamptz not null,
+  task_id text
+);
+create index if not exists niche_targets_rank_idx on niche_targets (organization_id, score desc);
+
+-- ---------------------------------------------------------------------------
+-- Aprovações
+-- ---------------------------------------------------------------------------
+create table if not exists approvals (
+  id text primary key,
+  organization_id text not null,
+  agent text not null,
+  kind text not null default 'agent_task',
+  title text not null,
+  detail text,
+  payload jsonb not null default '{}'::jsonb,
+  dedupe_key text,
+  status text not null default 'pendente' check (status in ('pendente','aprovado','recusado','expirado')),
+  decided_by text,
+  decided_at timestamptz,
+  task_id text,
+  created_at timestamptz not null default now(),
+  expires_at timestamptz not null
+);
+create index if not exists approvals_pending_idx on approvals (organization_id, status, created_at desc);
+create index if not exists approvals_dedupe_idx on approvals (organization_id, dedupe_key);
+
+-- ---------------------------------------------------------------------------
+-- Consumo (base dos tetos diários)
+-- ---------------------------------------------------------------------------
+create table if not exists spend_ledger (
+  id text primary key,
+  organization_id text not null,
+  agent text not null,
+  kind text not null check (kind in ('places_requests','leads','llm_tokens')),
+  amount numeric not null,
+  note text,
+  day date not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists spend_ledger_day_idx on spend_ledger (organization_id, agent, kind, day);
+
+-- ---------------------------------------------------------------------------
+-- RLS: leitura só da própria organização (via app_users, da 0004).
+-- ---------------------------------------------------------------------------
+do $$
+declare t text;
+begin
+  foreach t in array array[
+    'agent_settings','agent_tasks','agent_events','agent_heartbeats',
+    'niche_targets','approvals','spend_ledger'
+  ] loop
+    execute format('alter table %I enable row level security', t);
+    execute format('drop policy if exists %I on %I', t || '_org_select', t);
+    execute format(
+      'create policy %I on %I for select using (organization_id = (select organization_id from app_users where id = auth.uid()))',
+      t || '_org_select', t
+    );
+  end loop;
+end $$;
+
+
+-- ============================================================
+-- 0006_whatsapp.sql — WhatsApp: estado da conexão e recibos dos webhooks
+-- ============================================================
+
+-- Migração 0006 — WhatsApp (estado da conexão e recibos dos webhooks do gateway).
+--
+-- Mesmas convenções da 0005: `id` em text, `organization_id` em text sem FK, o
+-- servidor usa a service role e as políticas são só de leitura da própria
+-- organização. O gateway de WhatsApp NÃO acessa este banco: ele guarda a sessão
+-- e a caixa de saída num SQLite próprio e fala com o CRM por webhook assinado.
+-- Estas duas tabelas são o que o CRM guarda do que o gateway lhe contou.
+--
+-- Rode no SQL Editor do Supabase, depois da 0005. É idempotente.
+
+create table if not exists whatsapp_link (
+  id text primary key,                 -- id da sessão no gateway
+  organization_id text not null,
+  status text not null default 'DISCONNECTED'
+    check (status in ('DISCONNECTED','QR','CONNECTING','CONNECTED','NEEDS_RECONNECT')),
+  phone text,
+  push_name text,
+  last_error text,
+  dry_run boolean not null default true,
+  last_event_at timestamptz not null,
+  updated_at timestamptz not null default now()
+);
+create index if not exists whatsapp_link_org_idx on whatsapp_link (organization_id);
+
+-- Deduplicação: o gateway reenvia até o CRM confirmar, então o mesmo evento
+-- pode chegar mais de uma vez. O id do evento é a chave.
+create table if not exists whatsapp_receipts (
+  id text primary key,
+  organization_id text not null,
+  type text not null,
+  received_at timestamptz not null default now()
+);
+create index if not exists whatsapp_receipts_received_idx on whatsapp_receipts (received_at);
+
+do $$
+declare t text;
+begin
+  foreach t in array array['whatsapp_link','whatsapp_receipts'] loop
+    execute format('alter table %I enable row level security', t);
+    execute format('drop policy if exists %I on %I', t || '_org_select', t);
+    execute format(
+      'create policy %I on %I for select using (organization_id = (select organization_id from app_users where id = auth.uid()))',
+      t || '_org_select', t
+    );
+  end loop;
+end $$;
+
+
+-- ============================================================
+-- 0007_vendedor.sql — Vendedor: ciclos de envio, mensagens e lista de bloqueio
+-- ============================================================
+
+-- Migração 0007 — Vendedor (ciclos de envio, mensagens e lista de bloqueio).
+--
+-- Mesmas convenções da 0005/0006: `id` em text, `organization_id` em text sem FK,
+-- servidor com service role e políticas só de leitura da própria organização.
+--
+-- Rode no SQL Editor do Supabase, depois da 0006. É idempotente.
+
+-- O Vendedor também consulta se um número tem WhatsApp (consumo diário próprio).
+alter table spend_ledger drop constraint if exists spend_ledger_kind_check;
+alter table spend_ledger
+  add constraint spend_ledger_kind_check
+  check (kind in ('places_requests','leads','llm_tokens','whatsapp_lookups'));
+
+-- ---------------------------------------------------------------------------
+-- Ciclos de envio: agendado → reivindicado → enviado | pulado | falhou | incerto | cancelado
+-- ---------------------------------------------------------------------------
+create table if not exists outreach_cycles (
+  id text primary key,
+  organization_id text not null,
+  lead_id text not null,
+  touch int not null check (touch between 1 and 3),
+  phone text not null,
+  body text not null,
+  status text not null default 'agendado'
+    check (status in ('agendado','reivindicado','enviado','pulado','falhou','incerto','cancelado')),
+  scheduled_for timestamptz not null,
+  not_before timestamptz not null,
+  claimed_at timestamptz,
+  attempts int not null default 0,
+  idempotency_key text not null,
+  approval_id text,
+  skip_reason text,
+  last_error text,
+  message_id text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  sent_at timestamptz
+);
+-- A mesma chave nunca gera dois envios.
+create unique index if not exists outreach_cycles_idem_uq on outreach_cycles (idempotency_key);
+-- Um lead nunca tem duas abordagens ativas ao mesmo tempo (a corrida entre dois processos termina aqui).
+create unique index if not exists outreach_cycles_one_active_uq
+  on outreach_cycles (organization_id, lead_id)
+  where status in ('agendado','reivindicado');
+create index if not exists outreach_cycles_due_idx on outreach_cycles (status, not_before);
+create index if not exists outreach_cycles_lead_idx on outreach_cycles (organization_id, lead_id, touch);
+
+-- ---------------------------------------------------------------------------
+-- Mensagens enviadas e o estado confirmado pelo WhatsApp
+-- ---------------------------------------------------------------------------
+create table if not exists outreach_messages (
+  id text primary key,
+  organization_id text not null,
+  lead_id text not null,
+  cycle_id text not null,
+  phone text not null,
+  body text not null,
+  status text not null default 'QUEUED'
+    check (status in ('QUEUED','SENT','DELIVERED','READ','FAILED','UNCERTAIN')),
+  provider_message_id text,
+  error_detail text,
+  created_at timestamptz not null default now(),
+  sent_at timestamptz,
+  delivered_at timestamptz,
+  read_at timestamptz
+);
+create index if not exists outreach_messages_provider_idx on outreach_messages (provider_message_id);
+create index if not exists outreach_messages_lead_idx on outreach_messages (organization_id, lead_id, created_at desc);
+create index if not exists outreach_messages_sent_idx on outreach_messages (organization_id, sent_at);
+
+-- ---------------------------------------------------------------------------
+-- Lista de bloqueio: quem não pode receber mensagem (id = só os dígitos do telefone)
+-- ---------------------------------------------------------------------------
+create table if not exists channel_blocklist (
+  id text primary key,
+  organization_id text not null,
+  phone text not null,
+  reason text not null,
+  source text not null default 'manual' check (source in ('manual','opt_out','invalid')),
+  created_at timestamptz not null default now()
+);
+create index if not exists channel_blocklist_org_idx on channel_blocklist (organization_id);
+
+do $$
+declare t text;
+begin
+  foreach t in array array['outreach_cycles','outreach_messages','channel_blocklist'] loop
+    execute format('alter table %I enable row level security', t);
+    execute format('drop policy if exists %I on %I', t || '_org_select', t);
+    execute format(
+      'create policy %I on %I for select using (organization_id = (select organization_id from app_users where id = auth.uid()))',
+      t || '_org_select', t
+    );
+  end loop;
+end $$;
+
+
+-- ============================================================
+-- 0008_conversa.sql — Conversa do Vendedor: estado por lead, reuniões e aviso ao dono
+-- ============================================================
+
+-- Migração 0008 — Conversa do Vendedor (estado por lead, reuniões e aviso ao dono).
+--
+-- Mesmas convenções da 0005–0007: `id` em text, `organization_id` em text sem FK,
+-- servidor com service role e políticas só de leitura da própria organização.
+--
+-- Rode no SQL Editor do Supabase, depois da 0007. É idempotente.
+
+-- Ciclos de envio passam a ter dois tipos: abordagem (toques 1 a 3) e resposta a
+-- uma mensagem do lead (toque 0). O índice "um ciclo ativo por lead" continua valendo.
+alter table outreach_cycles add column if not exists kind text not null default 'abordagem';
+alter table outreach_cycles drop constraint if exists outreach_cycles_kind_check;
+alter table outreach_cycles
+  add constraint outreach_cycles_kind_check check (kind in ('abordagem','resposta'));
+alter table outreach_cycles drop constraint if exists outreach_cycles_touch_check;
+alter table outreach_cycles
+  add constraint outreach_cycles_touch_check check (touch between 0 and 3);
+
+-- ---------------------------------------------------------------------------
+-- Estado da conversa por lead (id = id do lead): quem conduz e o que falta.
+-- ---------------------------------------------------------------------------
+create table if not exists conversation_state (
+  id text primary key,
+  organization_id text not null,
+  lead_id text not null,
+  control text not null default 'agente' check (control in ('agente','humano')),
+  control_reason text,
+  awaiting text not null default 'nada' check (awaiting in ('nada','horario','humano')),
+  proposed_slots jsonb not null default '[]'::jsonb,
+  last_inbound_at timestamptz,
+  last_classification text,
+  attention_reason text,
+  interest_text text,
+  interest_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists conversation_state_org_idx on conversation_state (organization_id, awaiting);
+
+-- ---------------------------------------------------------------------------
+-- Reuniões marcadas (pelo agente ou à mão)
+-- ---------------------------------------------------------------------------
+create table if not exists meetings (
+  id text primary key,
+  organization_id text not null,
+  lead_id text not null,
+  at timestamptz not null,
+  duration_min int not null default 20,
+  status text not null default 'agendada' check (status in ('agendada','realizada','cancelada')),
+  source text not null default 'agente' check (source in ('agente','manual')),
+  interest_text text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists meetings_org_at_idx on meetings (organization_id, at);
+create index if not exists meetings_lead_idx on meetings (organization_id, lead_id);
+
+-- ---------------------------------------------------------------------------
+-- Aviso ao WhatsApp pessoal do dono (hoje: reunião marcada)
+-- ---------------------------------------------------------------------------
+create table if not exists owner_notices (
+  id text primary key,
+  organization_id text not null,
+  kind text not null default 'reuniao' check (kind in ('reuniao')),
+  lead_id text,
+  meeting_id text,
+  phone text not null,
+  body text not null,
+  status text not null default 'pendente' check (status in ('pendente','enviado','falhou','incerto')),
+  attempts int not null default 0,
+  not_before timestamptz not null,
+  provider_message_id text,
+  last_error text,
+  idempotency_key text not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  sent_at timestamptz
+);
+create unique index if not exists owner_notices_idem_uq on owner_notices (idempotency_key);
+create index if not exists owner_notices_due_idx on owner_notices (status, not_before);
+
+do $$
+declare t text;
+begin
+  foreach t in array array['conversation_state','meetings','owner_notices'] loop
+    execute format('alter table %I enable row level security', t);
+    execute format('drop policy if exists %I on %I', t || '_org_select', t);
+    execute format(
+      'create policy %I on %I for select using (organization_id = (select organization_id from app_users where id = auth.uid()))',
+      t || '_org_select', t
+    );
+  end loop;
+end $$;
+
+
+-- ============================================================
+-- 0009_dossie.sql — Dossiê de presença digital (Agente 3)
+-- ============================================================
+
+-- Migração 0009 — Dossiê de presença digital (Agente 3).
+--
+-- Mesmas convenções da 0005–0008: `id` em text, `organization_id` em text sem FK,
+-- servidor com service role e política só de leitura da própria organização.
+--
+-- Rode no SQL Editor do Supabase, depois da 0008. É idempotente.
+
+-- O Agente 3 também tem um teto diário próprio: dossiês montados.
+alter table spend_ledger drop constraint if exists spend_ledger_kind_check;
+alter table spend_ledger
+  add constraint spend_ledger_kind_check
+  check (kind in ('places_requests','leads','llm_tokens','whatsapp_lookups','dossiers'));
+
+-- ---------------------------------------------------------------------------
+-- Um dossiê por lead (id = id do lead), refeito quando passa da validade.
+-- `sources`, `findings` e `assessment` são JSON: o formato é o de LeadDossier em
+-- src/types/agents.ts. Toda afirmação em `findings` carrega a própria evidência.
+-- ---------------------------------------------------------------------------
+create table if not exists lead_dossiers (
+  id text primary key,
+  organization_id text not null,
+  lead_id text not null,
+  status text not null default 'parcial' check (status in ('concluido','parcial')),
+  confidence int not null default 0 check (confidence between 0 and 100),
+  sources jsonb not null default '[]'::jsonb,
+  findings jsonb not null default '[]'::jsonb,
+  assessment jsonb,
+  headline_problem text,
+  summary text not null default '',
+  website_quality_before text not null default 'desconhecido',
+  website_quality_after text not null default 'desconhecido',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  valid_until timestamptz not null
+);
+create index if not exists lead_dossiers_org_idx on lead_dossiers (organization_id, valid_until);
+create index if not exists lead_dossiers_lead_idx on lead_dossiers (organization_id, lead_id);
+
+alter table lead_dossiers enable row level security;
+drop policy if exists lead_dossiers_org_select on lead_dossiers;
+create policy lead_dossiers_org_select on lead_dossiers for select
+  using (organization_id = (select organization_id from app_users where id = auth.uid()));
+
+
+-- ============================================================
+-- 0010_sites.sql — Prévia de site (Agente 5)
+-- ============================================================
+
+-- Migração 0010 — Prévia de site (Agente 5).
+--
+-- Mesmas convenções da 0005–0009: `id` em text, `organization_id` em text sem FK,
+-- servidor com service role e política só de leitura da própria organização.
+--
+-- Rode no SQL Editor do Supabase, depois da 0009. É idempotente.
+
+-- O dossiê passa a guardar o perfil que o site usa (campos comprovados).
+alter table lead_dossiers add column if not exists profile jsonb;
+
+-- O aviso ao dono também avisa quando a prévia fica pronta.
+alter table owner_notices drop constraint if exists owner_notices_kind_check;
+alter table owner_notices
+  add constraint owner_notices_kind_check check (kind in ('reuniao','previa'));
+
+-- ---------------------------------------------------------------------------
+-- Prévias de site: na_fila → construindo → verificando → pronto | falhou | cancelado
+-- Os arquivos ficam no computador (.data/site-previews/<token>); aqui só o registro.
+-- ---------------------------------------------------------------------------
+create table if not exists site_builds (
+  id text primary key,
+  organization_id text not null,
+  lead_id text not null,
+  meeting_id text,
+  status text not null default 'na_fila'
+    check (status in ('na_fila','construindo','verificando','pronto','falhou','cancelado')),
+  builder text not null default 'modelos',
+  token text not null,
+  content_hash text,
+  checks jsonb not null default '[]'::jsonb,
+  screenshots jsonb not null default '[]'::jsonb,
+  error text,
+  deadline_at timestamptz,
+  cost_usd numeric not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  ready_at timestamptz,
+  expires_at timestamptz
+);
+-- O endereço da prévia é único e nunca se repete.
+create unique index if not exists site_builds_token_uq on site_builds (token);
+create index if not exists site_builds_lead_idx on site_builds (organization_id, lead_id, created_at desc);
+create index if not exists site_builds_status_idx on site_builds (organization_id, status);
+
+alter table site_builds enable row level security;
+drop policy if exists site_builds_org_select on site_builds;
+create policy site_builds_org_select on site_builds for select
+  using (organization_id = (select organization_id from app_users where id = auth.uid()));
+
+
+-- ============================================================
+-- 0011_social_trafego.sql — Mídias sociais (Agente 7) e Gestor de tráfego (Agente 6)
+-- ============================================================
+
+-- Migração 0011 — Mídias sociais (Agente 7) e Gestor de tráfego (Agente 6).
+--
+-- Mesmas convenções da 0005–0010: `id` em text, `organization_id` em text sem FK,
+-- servidor com service role e política só de leitura da própria organização.
+--
+-- Rode no SQL Editor do Supabase, depois da 0010. É idempotente.
+
+-- ---------------------------------------------------------------------------
+-- Posts do Instagram: rascunho → pendente → aprovado → publicando → publicado | falhou
+-- (recusado e expirado encerram sem publicar). Nada publica sem o clique em "Aprovar e publicar".
+-- ---------------------------------------------------------------------------
+create table if not exists social_posts (
+  id text primary key,
+  organization_id text not null,
+  platform text not null default 'instagram' check (platform in ('instagram')),
+  topic text not null,
+  caption text not null,
+  image_url text,
+  image_idea text not null default '',
+  status text not null default 'pendente'
+    check (status in ('rascunho','pendente','aprovado','publicando','publicado','falhou','recusado','expirado')),
+  approval_id text,
+  idempotency_key text not null,
+  external_id text,
+  permalink text,
+  error text,
+  uncertain boolean not null default false,
+  edited boolean not null default false,
+  approved_by text,
+  approved_at timestamptz,
+  published_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  expires_at timestamptz not null
+);
+-- O mesmo post nunca publica duas vezes.
+create unique index if not exists social_posts_idem_uq on social_posts (idempotency_key);
+create index if not exists social_posts_status_idx on social_posts (organization_id, status, created_at desc);
+
+-- ---------------------------------------------------------------------------
+-- Campanhas de anúncio: nascem rascunho; ativar e aumentar orçamento exigem clique, dentro dos tetos.
+-- Dinheiro sempre em centavos.
+-- ---------------------------------------------------------------------------
+create table if not exists ad_campaigns (
+  id text primary key,
+  organization_id text not null,
+  name text not null,
+  objective text not null check (objective in ('mensagens','trafego','reconhecimento','leads')),
+  platform text not null default 'manual' check (platform in ('manual','meta','google')),
+  status text not null default 'pendente'
+    check (status in ('rascunho','pendente','aprovado','ativa','pausada','encerrada','recusada','expirada','falhou')),
+  daily_budget_cents bigint not null check (daily_budget_cents >= 0),
+  start_date date not null,
+  end_date date,
+  audience text not null default '',
+  headline text not null default '',
+  body text not null default '',
+  cta text not null default '',
+  landing_url text,
+  approval_id text,
+  external_id text,
+  idempotency_key text not null,
+  error text,
+  approved_by text,
+  approved_at timestamptz,
+  activated_by text,
+  activated_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  expires_at timestamptz not null
+);
+create unique index if not exists ad_campaigns_idem_uq on ad_campaigns (idempotency_key);
+create index if not exists ad_campaigns_status_idx on ad_campaigns (organization_id, status);
+
+-- Desempenho por campanha por dia (id = '<campanha>:<dia>').
+create table if not exists ad_reports (
+  id text primary key,
+  organization_id text not null,
+  campaign_id text not null,
+  day date not null,
+  impressions bigint not null default 0,
+  clicks bigint not null default 0,
+  spend_cents bigint not null default 0,
+  conversions bigint not null default 0,
+  source text not null default 'manual' check (source in ('manual','provider')),
+  created_at timestamptz not null default now()
+);
+create index if not exists ad_reports_day_idx on ad_reports (organization_id, day);
+
+do $$
+declare t text;
+begin
+  foreach t in array array['social_posts','ad_campaigns','ad_reports'] loop
+    execute format('alter table %I enable row level security', t);
+    execute format('drop policy if exists %I on %I', t || '_org_select', t);
+    execute format(
+      'create policy %I on %I for select using (organization_id = (select organization_id from app_users where id = auth.uid()))',
+      t || '_org_select', t
+    );
+  end loop;
+end $$;

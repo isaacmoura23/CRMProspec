@@ -1,5 +1,5 @@
 import type { RawLead, SearchParams } from "@/types";
-import type { LeadProvider } from "@/providers/types";
+import type { LeadProvider, SearchHooks } from "@/providers/types";
 import { nicheByKey } from "@/providers/directory-data";
 import { extractInstagramHandle, extractWhatsapp } from "@/services/enrichment";
 
@@ -155,7 +155,7 @@ export class GooglePlacesProvider implements LeadProvider {
     return Boolean(process.env.GOOGLE_PLACES_API_KEY);
   }
 
-  async search(params: SearchParams): Promise<RawLead[]> {
+  async search(params: SearchParams, hooks?: SearchHooks): Promise<RawLead[]> {
     const key = process.env.GOOGLE_PLACES_API_KEY;
     if (!key) return [];
 
@@ -189,6 +189,7 @@ export class GooglePlacesProvider implements LeadProvider {
       const placesNestaConsulta = () => places.length - antesDestaConsulta;
 
       do {
+        hooks?.onRequest?.();
         const res = await fetch("https://places.googleapis.com/v1/places:searchText", {
           method: "POST",
           headers: {

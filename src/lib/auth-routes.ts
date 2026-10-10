@@ -3,7 +3,7 @@
  */
 
 /** Rotas alcançáveis sem sessão. O worker e o webhook têm autenticação própria. */
-export const PUBLIC_PATHS = ["/login", "/auth", "/api/webhooks", "/api/career/worker"];
+export const PUBLIC_PATHS = ["/login", "/auth", "/api/webhooks", "/api/career/worker", "/previa"];
 
 export function isPublicPath(pathname: string): boolean {
   return PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));

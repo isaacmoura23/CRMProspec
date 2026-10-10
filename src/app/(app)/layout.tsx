@@ -1,5 +1,7 @@
 import { getDb } from "@/lib/store";
 import { getCurrentUser } from "@/lib/auth";
+import { canAdminister } from "@/lib/permissions";
+import { WhatsappStatusBanner } from "@/features/whatsapp/status-banner";
 import { sweepStaleLeads } from "@/services/events";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Topbar } from "@/components/layout/topbar";
@@ -24,7 +26,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <Sidebar />
           <div className="lg:pl-60">
             <Topbar user={user} notifications={notifications} />
-            <main className="mx-auto max-w-7xl px-4 py-6 lg:px-8">{children}</main>
+            <main className="mx-auto max-w-7xl px-4 py-6 lg:px-8">
+              {/* Só owner e admin: são os que podem reconectar o número. */}
+              {canAdminister(user.role) && <WhatsappStatusBanner />}
+              {children}
+            </main>
           </div>
           <CommandPalette />
         </div>

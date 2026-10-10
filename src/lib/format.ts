@@ -51,6 +51,15 @@ export function formatNumber(value: number): string {
   return new Intl.NumberFormat("pt-BR").format(value);
 }
 
+/**
+ * Concorda o substantivo com a contagem: `plural(1, "lead")` → "1 lead".
+ * Para formas irregulares, passe o plural: `plural(1, "negócio fechado",
+ * "negócios fechados")`.
+ */
+export function plural(count: number, singular: string, many?: string): string {
+  return `${formatNumber(count)} ${count === 1 ? singular : (many ?? `${singular}s`)}`;
+}
+
 export function formatPercent(value: number, digits = 1): string {
   return `${new Intl.NumberFormat("pt-BR", { maximumFractionDigits: digits }).format(value)}%`;
 }
